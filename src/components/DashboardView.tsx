@@ -17,7 +17,6 @@ import {
 import {
   Search,
   SlidersHorizontal,
-  FileSpreadsheet,
   Scale,
   Fish,
   MapPin,
@@ -28,6 +27,12 @@ import {
   ArrowUpDown,
   Info,
   Upload,
+  Plus,
+  Pencil,
+  Trash2,
+  FileText,
+  Target,
+  Users,
 } from 'lucide-react';
 import {
   FilterState,
@@ -36,6 +41,9 @@ import {
 } from '../types/fishery';
 import { DashboardBanner } from './DashboardBanner';
 import { ControlSidebar } from './ControlSidebar';
+import { BarinasMap } from './BarinasMap';
+import { RecordModal } from './RecordModal';
+import { ExecutiveReportModal } from './ExecutiveReportModal';
 import {
   downloadSampleExcelTemplate,
   exportRecordsToExcel,
@@ -49,6 +57,13 @@ interface DashboardViewProps {
   onUploadFiles: (files: FileList) => Promise<void>;
   onRemoveSingleFile: (fileName: string) => void;
   onClearAllHistory: () => void;
+  onSaveManualRecord: (
+    data: Omit<FisheryRecord, 'id' | 'archivoOrigen'>,
+    existingId?: string
+  ) => void;
+  onDeleteRecord: (id: string) => void;
+  regionalGoalTons: number;
+  onUpdateRegionalGoal: (goal: number) => void;
   filters: FilterState;
   onUpdateFilters: (next: Partial<FilterState>) => void;
   onResetFilters: () => void;
@@ -57,11 +72,11 @@ interface DashboardViewProps {
 }
 
 const CHART_COLORS = [
-  '#0284c7', // sky-600 (Ocean blue)
-  '#06b6d4', // cyan-500 (Turquoise)
-  '#0f172a', // slate-900 (Deep navy)
-  '#eab308', // yellow-500 (Institutional gold)
-  '#f43f5e', // rose-500 (Coral red accent)
+  '#0284c7', // sky-600
+  '#06b6d4', // cyan-500
+  '#0f172a', // slate-900
+  '#eab308', // yellow-500
+  '#f43f5e', // rose-500
   '#0d9488', // teal-600
   '#2563eb', // blue-600
   '#ea580c', // orange-600
@@ -83,6 +98,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onUploadFiles,
   onRemoveSingleFile,
   onClearAllHistory,
+  onSaveManualRecord,
+  onDeleteRecord,
+  regionalGoalTons,
+  onUpdateRegionalGoal,
   filters,
   onUpdateFilters,
   onResetFilters,
@@ -100,6 +119,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(8);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
+
+  // Modals state
+  const [recordModalOpen, setRecordModalOpen] = useState<boolean>(false);
+  const [editingRecord, setEditingRecord] = useState<FisheryRecord | null>(
+    null
+  );
+  const [reportModalOpen, setReportModalOpen] = useState<boolean>(false);
+  const [editingGoal, setEditingGoal] = useState<boolean>(false);
+  const [goalInput, setGoalInput] = useState<string>(String(regionalGoalTons));
 
   const quickFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -165,6 +193,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       (acc, r) => acc + r.toneladas,
       0
     );
+    const totalKilogramos = Math.round(totalToneladas * 1000);
     const uniqueSpecies = new Set(filteredRecords.map((r) => r.especie)).size;
     const uniqueMunicipios = new Set(filteredRecords.map((r) => r.municipio))
       .size;
@@ -172,20 +201,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       (acc, r) => acc + r.familiasBeneficiadas,
       0
     );
+    const avgKgPerFamily =
+      totalFamilias > 0 ? +(totalKilogramos / totalFamilias).toFixed(2) : 0;
+    const goalPct =
+      regionalGoalTons > 0
+        ? Math.min(100, +((totalToneladas / regionalGoalTons) * 100).toFixed(1))
+        : 0;
 
     return {
       totalToneladas,
-      totalKilogramos: Math.round(totalToneladas * 1000),
+      totalKilogramos,
       uniqueSpecies,
       uniqueMunicipios,
       totalJornadas: filteredRecords.length,
       totalFamilias,
+      avgKgPerFamily,
+      goalPct,
     };
-  }, [filteredRecords]);
+  }, [filteredRecords, regionalGoalTons]);
 
   // 1. Bar Chart Data (by Species or by Municipality)
   const barChartData = useMemo(() => {
-    const map = new Map<string, { name: string; toneladas: number; familias: number }>();
+    const map = new Map<
+      string,
+      { name: string; toneladas: number; familias: number }
+    >();
     filteredRecords.forEach((r) => {
       const key = barChartMode === 'especie' ? r.especie : r.municipio;
       const existing = map.get(key) || { name: key, toneladas: 0, familias: 0 };
@@ -196,15 +236,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(map.values()).sort((a, b) => b.toneladas - a.toneladas);
   }, [filteredRecords, barChartMode]);
 
-  // 2. Temporal Evolution Data (Sorted chronologically)
+  // 2. Temporal Evolution Data
   const timeSeriesData = useMemo(() => {
-    const map = new Map<string, { fecha: string; toneladas: number; acumulado: number }>();
+    const map = new Map<
+      string,
+      { fecha: string; toneladas: number; acumulado: number }
+    >();
     const sortedByDate = [...filteredRecords].sort((a, b) =>
       a.fecha.localeCompare(b.fecha)
     );
 
     sortedByDate.forEach((r) => {
-      // Group by YYYY-MM or exact date if few dates
       const key = r.fecha;
       const existing = map.get(key) || { fecha: key, toneladas: 0, acumulado: 0 };
       existing.toneladas = +(existing.toneladas + r.toneladas).toFixed(2);
@@ -249,7 +291,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return copy;
   }, [filteredRecords, sortField, sortAsc]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedTableRecords.length / pageSize));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(sortedTableRecords.length / pageSize)
+  );
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedRecords = useMemo(() => {
@@ -302,7 +347,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Venezuela Come + Pescado
           </button>
 
-          {/* Zone 2: 4–5 clean single-line text navigation links */}
+          {/* Zone 2: 5 clean single-line text navigation links */}
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
             <button
               type="button"
@@ -317,6 +362,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               Indicadores
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToSection('seccion-mapa')}
+              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              Mapa Barinas
             </button>
             <button
               type="button"
@@ -360,10 +412,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Main Container */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-8 pt-6">
-        {/* Top Banner Superior (Borderless, rounded, fluid) */}
+        {/* Top Banner Superior */}
         <DashboardBanner />
 
-        {/* Demo Data Notice Banner (Shown when no Excel file has been uploaded yet) */}
+        {/* Demo Data Notice Banner */}
         {isUsingDemoData && (
           <div
             role="status"
@@ -376,7 +428,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Mostrando datos de ejemplo - Sube un archivo Excel para actualizar
                 </p>
                 <p className="text-xs text-amber-800">
-                  Visualizando registros demostrativos de pesca y acuicultura en la Región Barinas (Cachama, Coporo, Bagre, Pavón). Al cargar tu primer archivo Excel, pasarás al modo de acumulación real.
+                  Visualizando registros demostrativos de pesca y acuicultura en la Región Barinas. Puedes subir un archivo Excel, registrar jornadas manualmente o editar cualquier fila.
                 </p>
               </div>
             </div>
@@ -399,90 +451,194 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         )}
 
-        {/* Two-Column Analytical Workspace Layout: Left/Center Main Area + Right Sidebar */}
+        {/* Two-Column Analytical Workspace Layout */}
         <div className="flex flex-col lg:flex-row items-start gap-6">
           {/* Área Central (Izquierda/Centro en Desktop, Superior en Móvil) */}
           <div className="flex-1 min-w-0 w-full space-y-6">
-            {/* 1. Tarjetas Superiores de KPIs */}
+            {/* 1. Tarjetas Superiores de KPIs + Meta Mensual */}
             <section
               id="seccion-kpis"
               aria-label="Indicadores Clave de Desempeño"
-              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
+              className="space-y-4"
             >
-              {/* KPI 1: Total Toneladas */}
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                  <span>Total Toneladas</span>
-                  <Scale className="w-4 h-4 text-cyan-600" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                {/* KPI 1: Total Toneladas */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Total Toneladas</span>
+                    <Scale className="w-4 h-4 text-cyan-600" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
+                    {kpiMetrics.totalToneladas.toFixed(2)}{' '}
+                    <span className="text-sm font-semibold text-cyan-700">
+                      TM
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
+                    <span>
+                      {kpiMetrics.totalKilogramos.toLocaleString('es-VE')} Kg
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>Proteína distribuida</span>
+                  </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
-                  {kpiMetrics.totalToneladas.toFixed(2)}{' '}
-                  <span className="text-sm font-semibold text-cyan-700">TM</span>
+
+                {/* KPI 2: Especies Registradas */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Especies Registradas</span>
+                    <Fish className="w-4 h-4 text-sky-600" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
+                    {kpiMetrics.uniqueSpecies}
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 truncate">
+                    <span>Líder:</span>
+                    <span className="font-semibold text-slate-700 truncate">
+                      {barChartData[0]?.name || 'N/A'}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
-                  <span>{kpiMetrics.totalKilogramos.toLocaleString('es-VE')} Kg</span>
-                  <span aria-hidden="true">·</span>
-                  <span>Proteína distribuida</span>
+
+                {/* KPI 3: Jornadas / Municipios */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Jornadas / Municipios</span>
+                    <MapPin className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
+                    {kpiMetrics.totalJornadas}{' '}
+                    <span className="text-sm font-normal text-slate-400">/</span>{' '}
+                    <span className="text-xl text-sky-700">
+                      {kpiMetrics.uniqueMunicipios} Mun.
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
+                    <span>
+                      {kpiMetrics.totalFamilias.toLocaleString('es-VE')} familias
+                      atendidas
+                    </span>
+                  </div>
+                </div>
+
+                {/* KPI 4: Archivos Cargados & Promedio Proteico */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Archivos Cargados</span>
+                    <FolderCheck className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
+                    {uploadedFiles.length}
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
+                    <Users className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+                    <span>Promedio: {kpiMetrics.avgKgPerFamily} Kg / familia</span>
+                  </div>
                 </div>
               </div>
 
-              {/* KPI 2: Especies Registradas */}
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                  <span>Especies Registradas</span>
-                  <Fish className="w-4 h-4 text-sky-600" />
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
-                  {kpiMetrics.uniqueSpecies}
-                </div>
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 truncate">
-                  <span>Líder:</span>
-                  <span className="font-semibold text-slate-700 truncate">
-                    {barChartData[0]?.name || 'N/A'}
-                  </span>
-                </div>
-              </div>
+              {/* Barra de Cumplimiento de Meta Regional + Acciones Rápidas */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4 sm:px-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                      <Target className="w-4 h-4 text-cyan-600" />
+                      <span>
+                        Meta Regional de Distribución Proteica:{' '}
+                        <span className="font-mono tabular-nums text-cyan-700">
+                          {kpiMetrics.totalToneladas.toFixed(2)} /{' '}
+                          {regionalGoalTons} TM ({kpiMetrics.goalPct}%)
+                        </span>
+                      </span>
+                    </div>
 
-              {/* KPI 3: Jornadas / Municipios */}
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                  <span>Jornadas / Municipios</span>
-                  <MapPin className="w-4 h-4 text-amber-500" />
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
-                  {kpiMetrics.totalJornadas}{' '}
-                  <span className="text-sm font-normal text-slate-400">/</span>{' '}
-                  <span className="text-xl text-sky-700">
-                    {kpiMetrics.uniqueMunicipios} Mun.
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
-                  <span>
-                    {kpiMetrics.totalFamilias.toLocaleString('es-VE')} familias atendidas
-                  </span>
-                </div>
-              </div>
+                    {!editingGoal ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGoalInput(String(regionalGoalTons));
+                          setEditingGoal(true);
+                        }}
+                        className="text-xs font-semibold text-cyan-700 hover:text-cyan-900 cursor-pointer"
+                      >
+                        Ajustar meta (TM)
+                      </button>
+                    ) : (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const val = parseFloat(goalInput);
+                          if (!isNaN(val) && val > 0) {
+                            onUpdateRegionalGoal(val);
+                          }
+                          setEditingGoal(false);
+                        }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={goalInput}
+                          onChange={(e) => setGoalInput(e.target.value)}
+                          className="w-20 rounded border border-slate-300 px-2 py-0.5 text-xs font-mono tabular-nums"
+                        />
+                        <button
+                          type="submit"
+                          className="px-2 py-0.5 rounded bg-cyan-600 text-white text-xs font-semibold cursor-pointer"
+                        >
+                          OK
+                        </button>
+                      </form>
+                    )}
+                  </div>
 
-              {/* KPI 4: Archivos Cargados */}
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                  <span>Archivos Cargados</span>
-                  <FolderCheck className="w-4 h-4 text-emerald-600" />
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-sky-600 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(3, kpiMetrics.goalPct)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
-                  {uploadedFiles.length}
-                </div>
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
-                  <span>
-                    {isUsingDemoData
-                      ? 'Base demostrativa activa'
-                      : 'Consolidado acumulativo Excel'}
-                  </span>
+
+                {/* Botones Ejecutivos: Registrar Jornada Manual e Informe Ejecutivo */}
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRecord(null);
+                      setRecordModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Registrar Jornada</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReportModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-cyan-700" />
+                    <span>Informe Ejecutivo / PDF</span>
+                  </button>
                 </div>
               </div>
             </section>
 
-            {/* 2. Gráficos Interactivos */}
+            {/* 2. Mapa Interactivo del Estado Barinas y Semáforo Municipal */}
+            <BarinasMap
+              records={records}
+              selectedMunicipio={filters.municipio}
+              onSelectMunicipio={(municipio) => {
+                onUpdateFilters({ municipio });
+                setCurrentPage(1);
+              }}
+              regionalGoalTons={regionalGoalTons}
+            />
+
+            {/* 3. Gráficos Interactivos */}
             <section
               id="seccion-graficos"
               aria-label="Visualizaciones analíticas"
@@ -595,7 +751,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 )}
               </div>
 
-              {/* Segunda Fila de Gráficos: Evolución Temporal (Líneas/Área) + Distribución (Dona) */}
+              {/* Segunda Fila de Gráficos: Evolución Temporal + Distribución (Dona) */}
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                 {/* Gráfico de Líneas / Evolución Temporal (7 cols) */}
                 <div className="xl:col-span-7 bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs">
@@ -755,7 +911,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               `${Number(value ?? 0).toFixed(2)} TM (${
                                 kpiMetrics.totalToneladas > 0
                                   ? (
-                                      (Number(value ?? 0) / kpiMetrics.totalToneladas) *
+                                      (Number(value ?? 0) /
+                                        kpiMetrics.totalToneladas) *
                                       100
                                     ).toFixed(1)
                                   : 0
@@ -784,7 +941,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </section>
 
-            {/* 3. Tabla de Datos Paginada con Buscador en Tiempo Real */}
+            {/* 4. Tabla de Datos Paginada con Buscador en Tiempo Real + Edición/Eliminación */}
             <section
               id="seccion-tabla"
               aria-label="Tabla de registros acumulados"
@@ -809,9 +966,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   {/* Buscador en tiempo real */}
-                  <div className="relative min-w-[240px] sm:min-w-[280px]">
+                  <div className="relative min-w-[220px] sm:min-w-[250px] flex-1 sm:flex-none">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="search"
@@ -825,15 +982,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     />
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRecord(null);
+                      setRecordModalOpen(true);
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Nueva Fila</span>
+                  </button>
+
                   {/* Export Consolidated Data Button */}
                   <button
                     type="button"
                     onClick={() => exportRecordsToExcel(filteredRecords)}
                     disabled={filteredRecords.length === 0}
-                    className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5 text-cyan-700" />
-                    <span>Exportar Consolidado (.xlsx)</span>
+                    <span>Exportar (.xlsx)</span>
                   </button>
                 </div>
               </div>
@@ -906,13 +1075,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <th className="py-3 px-4 whitespace-nowrap">
                         Punto / Origen
                       </th>
+                      <th className="py-3 px-4 whitespace-nowrap text-right">
+                        Acciones
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200/70 text-xs">
                     {paginatedRecords.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={8}
                           className="py-12 px-4 text-center text-slate-500"
                         >
                           No se encontraron registros que coincidan con la búsqueda o filtros activos.
@@ -934,10 +1106,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             <span className="font-medium text-slate-800">
                               {row.municipio}
                             </span>
-                            <span className="text-slate-400 mx-1.5" aria-hidden="true">
+                            <span
+                              className="text-slate-400 mx-1.5"
+                              aria-hidden="true"
+                            >
                               ·
                             </span>
-                            <span className="text-slate-500">{row.parroquia}</span>
+                            <span className="text-slate-500">
+                              {row.parroquia}
+                            </span>
                           </td>
                           <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                             {row.tipoPesca}
@@ -948,11 +1125,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
                             {row.familiasBeneficiadas.toLocaleString('es-VE')}
                           </td>
-                          <td className="py-3 px-4 text-slate-500 max-w-[220px] truncate">
+                          <td className="py-3 px-4 text-slate-500 max-w-[190px] truncate">
                             <span title={row.puntoDistribucion}>
                               {row.puntoDistribucion}
                             </span>
-                            <span className="mx-1.5 text-slate-300" aria-hidden="true">
+                            <span
+                              className="mx-1.5 text-slate-300"
+                              aria-hidden="true"
+                            >
                               /
                             </span>
                             <span
@@ -961,6 +1141,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             >
                               {row.archivoOrigen}
                             </span>
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingRecord(row);
+                                  setRecordModalOpen(true);
+                                }}
+                                title="Editar fila"
+                                className="p-1.5 rounded text-slate-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteRecord(row.id)}
+                                title="Eliminar fila"
+                                className="p-1.5 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1044,6 +1247,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           />
         </div>
       </main>
+
+      {/* Modal: Registrar / Editar Jornada Manual */}
+      <RecordModal
+        isOpen={recordModalOpen}
+        initialRecord={editingRecord}
+        onClose={() => {
+          setRecordModalOpen(false);
+          setEditingRecord(null);
+        }}
+        onSave={onSaveManualRecord}
+      />
+
+      {/* Modal: Informe Ejecutivo Imprimible / PDF */}
+      <ExecutiveReportModal
+        isOpen={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        records={filteredRecords}
+        regionalGoalTons={regionalGoalTons}
+      />
     </div>
   );
 };

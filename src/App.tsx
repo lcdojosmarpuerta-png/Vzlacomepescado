@@ -7,6 +7,7 @@ import { StickyFooter } from './components/StickyFooter';
 
 const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v1';
 const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v1';
+const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v1';
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -49,6 +50,20 @@ export default function App() {
     return [];
   });
 
+  // Persisted regional goal in Metric Tons
+  const [regionalGoalTons, setRegionalGoalTons] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_GOAL_KEY);
+      if (saved) {
+        const num = parseFloat(saved);
+        if (!isNaN(num) && num > 0) return num;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return 120;
+  });
+
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadFeedback, setUploadFeedback] = useState<{
@@ -66,24 +81,20 @@ export default function App() {
     }
   }, [uploadedRecords, uploadedFiles]);
 
-  // If no Excel files have been uploaded yet, show realistic Barinas demo data
-  const isUsingDemoData = uploadedFiles.length === 0;
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_GOAL_KEY, String(regionalGoalTons));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [regionalGoalTons]);
+
+  // If no Excel files or custom records have been saved yet, show realistic Barinas demo data
+  const isUsingDemoData =
+    uploadedFiles.length === 0 && uploadedRecords.length === 0;
   const activeRecords = useMemo(() => {
     return isUsingDemoData ? DEMO_RECORDS : uploadedRecords;
   }, [isUsingDemoData, uploadedRecords]);
-
-  // Global summary stats for the Hero Landing page
-  const summaryStats = useMemo(() => {
-    const totalToneladas = activeRecords.reduce((acc, r) => acc + r.toneladas, 0);
-    const totalSpecies = new Set(activeRecords.map((r) => r.especie)).size;
-    const totalMunicipios = new Set(activeRecords.map((r) => r.municipio)).size;
-    return {
-      totalToneladas,
-      totalSpecies,
-      totalMunicipios,
-      totalFiles: uploadedFiles.length,
-    };
-  }, [activeRecords, uploadedFiles.length]);
 
   // Cumulative Excel File Upload Handler
   const handleUploadFiles = async (fileList: FileList) => {
@@ -98,10 +109,13 @@ export default function App() {
         const file = fileList[i];
         const buffer = await file.arrayBuffer();
 
-        // Ensure unique display name if user uploads same filename multiple times
         const duplicateCount =
-          uploadedFiles.filter((f) => f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))).length +
-          newFilesBatch.filter((f) => f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))).length;
+          uploadedFiles.filter((f) =>
+            f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))
+          ).length +
+          newFilesBatch.filter((f) =>
+            f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))
+          ).length;
 
         const effectiveFileName =
           duplicateCount > 0
@@ -141,7 +155,6 @@ export default function App() {
             'No se encontraron filas válidas en el archivo seleccionado. Verifica que contenga datos.',
         });
       } else {
-        // CRITICAL LOGIC: Accumulate new records to existing uploaded records without erasing previous uploads
         setUploadedRecords((prev) => [...prev, ...newRecordsBatch]);
         setUploadedFiles((prev) => [...prev, ...newFilesBatch]);
 
@@ -164,6 +177,49 @@ export default function App() {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Save a manual record or edit an existing row
+  const handleSaveManualRecord = (
+    data: Omit<FisheryRecord, 'id' | 'archivoOrigen'>,
+    existingId?: string
+  ) => {
+    const basePool = isUsingDemoData ? [...DEMO_RECORDS] : [...uploadedRecords];
+
+    if (existingId) {
+      const updated = basePool.map((rec) =>
+        rec.id === existingId ? { ...rec, ...data } : rec
+      );
+      setUploadedRecords(updated);
+      setUploadFeedback({
+        type: 'success',
+        message: `Registro actualizado (${data.especie} · ${data.municipio}).`,
+      });
+    } else {
+      const newRec: FisheryRecord = {
+        ...data,
+        id: `manual-${Date.now()}`,
+        archivoOrigen: 'Registro Manual',
+      };
+      setUploadedRecords([newRec, ...basePool]);
+      setUploadFeedback({
+        type: 'success',
+        message: `Jornada registrada manualmente (+${data.toneladas.toFixed(
+          2
+        )} TM en ${data.municipio}).`,
+      });
+    }
+  };
+
+  // Delete an individual record row
+  const handleDeleteRecord = (id: string) => {
+    const basePool = isUsingDemoData ? [...DEMO_RECORDS] : [...uploadedRecords];
+    const nextPool = basePool.filter((r) => r.id !== id);
+    setUploadedRecords(nextPool);
+    setUploadFeedback({
+      type: 'success',
+      message: 'Fila eliminada del registro consolidado.',
+    });
   };
 
   // Remove a single uploaded file from the cumulative pool
@@ -211,10 +267,6 @@ export default function App() {
             setCurrentView('dashboard');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          totalToneladas={summaryStats.totalToneladas}
-          totalSpecies={summaryStats.totalSpecies}
-          totalMunicipios={summaryStats.totalMunicipios}
-          totalFiles={summaryStats.totalFiles}
         />
       ) : (
         <DashboardView
@@ -228,6 +280,10 @@ export default function App() {
           onUploadFiles={handleUploadFiles}
           onRemoveSingleFile={handleRemoveSingleFile}
           onClearAllHistory={handleClearAllHistory}
+          onSaveManualRecord={handleSaveManualRecord}
+          onDeleteRecord={handleDeleteRecord}
+          regionalGoalTons={regionalGoalTons}
+          onUpdateRegionalGoal={setRegionalGoalTons}
           filters={filters}
           onUpdateFilters={handleUpdateFilters}
           onResetFilters={handleResetFilters}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, BarChart3, Fish } from 'lucide-react';
+import { ArrowRight, BarChart3 } from 'lucide-react';
+import { OfficialLogo } from './OfficialLogo';
 
 interface HeroLandingProps {
   onEnterDashboard: () => void;
@@ -14,7 +15,6 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({
   onEnterDashboard,
 }) => {
   const [bgError, setBgError] = useState(false);
-  const [logoError, setLogoError] = useState(false);
 
   return (
     <div className="relative min-h-screen w-full flex flex-col justify-between overflow-hidden bg-slate-950 text-white pb-14">
@@ -50,35 +50,15 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({
       {/* Main Content Aligned Left-Center */}
       <main className="relative z-10 flex-1 flex items-center w-full max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-16 py-12">
         <div className="max-w-3xl flex flex-col items-start text-left">
-          {/* Official Site Logo with Smooth Entrance Animation */}
+          {/* Official Site Logo with Smooth Entrance Animation & Transparent Silhouette */}
           <motion.div
             initial={{ opacity: 0, y: 18, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-7"
+            className="mb-6"
           >
-            <div className="inline-flex items-center p-3 sm:p-4 rounded-2xl bg-white/95 backdrop-blur-md shadow-2xl shadow-cyan-950/50">
-              {!logoError ? (
-                <img
-                  src="/assets/aistudio/venezuela_come_49c2d0ef.png"
-                  alt="Logo Oficial Venezuela Come Pescado"
-                  referrerPolicy="no-referrer"
-                  onError={() => setLogoError(true)}
-                  className="h-20 sm:h-28 md:h-32 w-auto object-contain"
-                />
-              ) : (
-                <div className="flex items-center gap-3 px-4 py-2">
-                  <Fish className="w-10 h-10 text-cyan-600" />
-                  <div>
-                    <span className="block text-xs font-extrabold text-amber-500">
-                      VENEZUELA
-                    </span>
-                    <span className="block text-xl font-black text-cyan-600">
-                      COME + PESCADO
-                    </span>
-                  </div>
-                </div>
-              )}
+            <div className="inline-flex items-center drop-shadow-[0_12px_28px_rgba(8,145,178,0.45)]">
+              <OfficialLogo className="h-28 sm:h-36 md:h-44 w-auto object-contain" />
             </div>
           </motion.div>
 

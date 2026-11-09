@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Waves, Fish, Compass } from 'lucide-react';
+import { OfficialLogo } from './OfficialLogo';
 
 interface BannerSlide {
   id: string;
@@ -45,7 +46,6 @@ const BANNER_SLIDES: BannerSlide[] = [
 export const DashboardBanner: React.FC = () => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
-  const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -172,20 +172,8 @@ export const DashboardBanner: React.FC = () => {
 
           {/* Right Brand & Slide Controls */}
           <div className="flex md:flex-col items-center md:items-end justify-between w-full md:w-auto gap-4 shrink-0">
-            <div className="hidden sm:flex items-center gap-3 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-md">
-              {!logoError ? (
-                <img
-                  src="/assets/aistudio/venezuela_come_49c2d0ef.png"
-                  alt="Venezuela Come Pescado"
-                  referrerPolicy="no-referrer"
-                  onError={() => setLogoError(true)}
-                  className="h-11 w-auto object-contain"
-                />
-              ) : (
-                <span className="text-xs font-extrabold text-sky-900">
-                  VENEZUELA COME PESCADO
-                </span>
-              )}
+            <div className="hidden sm:flex items-center drop-shadow-md">
+              <OfficialLogo className="h-16 w-auto object-contain" />
             </div>
 
             <div className="flex items-center gap-2">
