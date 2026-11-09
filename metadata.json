@@ -1,0 +1,6 @@
+{
+  "name": "Venezuela Come + Pescado | Observatorio Región Barinas",
+  "description": "Sistema de Inteligencia y Observatorio de Pesca y Acuicultura para el programa Venezuela Come + Pescado en la Región Barinas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
