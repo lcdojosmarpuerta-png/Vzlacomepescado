@@ -25,7 +25,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
-  Info,
   Upload,
   Plus,
   Pencil,
@@ -33,6 +32,8 @@ import {
   FileText,
   Target,
   Users,
+  Home,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   FilterState,
@@ -53,7 +54,6 @@ interface DashboardViewProps {
   onBackToHero: () => void;
   records: FisheryRecord[];
   uploadedFiles: UploadedFileMeta[];
-  isUsingDemoData: boolean;
   onUploadFiles: (files: FileList) => Promise<void>;
   onRemoveSingleFile: (fileName: string) => void;
   onClearAllHistory: () => void;
@@ -94,7 +94,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onBackToHero,
   records,
   uploadedFiles,
-  isUsingDemoData,
   onUploadFiles,
   onRemoveSingleFile,
   onClearAllHistory,
@@ -108,9 +107,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isUploading,
   uploadFeedback,
 }) => {
-  const [barChartMode, setBarChartMode] = useState<'especie' | 'municipio'>(
-    'especie'
-  );
+  const [barChartMode, setBarChartMode] = useState<string>('especie');
   const [donutMode, setDonutMode] = useState<'tipoPesca' | 'especie'>(
     'tipoPesca'
   );
@@ -119,6 +116,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(8);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
+  const [tableViewMode, setTableViewMode] = useState<'excel' | 'estandar'>(
+    'excel'
+  );
 
   // Modals state
   const [recordModalOpen, setRecordModalOpen] = useState<boolean>(false);
@@ -131,7 +131,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const quickFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Extract unique filter options from all loaded records
+  // Extract unique filter options from loaded records
   const availableSpecies = useMemo(() => {
     return Array.from(new Set(records.map((r) => r.especie))).sort();
   }, [records]);
@@ -144,13 +144,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(new Set(records.map((r) => r.tipoPesca))).sort();
   }, [records]);
 
-  // Apply dynamic filters + real-time search
+  // Extract all exact column names and unique values from uploaded Excel files
+  const allExcelColumnNames = useMemo(() => {
+    const colSet = new Set<string>();
+    uploadedFiles.forEach((f) => {
+      f.columns?.forEach((c) => colSet.add(c));
+    });
+    records.forEach((r) => {
+      if (r.rawFields) {
+        Object.keys(r.rawFields).forEach((k) => colSet.add(k));
+      }
+    });
+    return Array.from(colSet);
+  }, [uploadedFiles, records]);
+
+  const dynamicExcelColumns = useMemo(() => {
+    return allExcelColumnNames
+      .map((column) => {
+        const valSet = new Set<string>();
+        records.forEach((r) => {
+          const val = r.rawFields?.[column];
+          if (val !== undefined && val !== '') {
+            valSet.add(val);
+          }
+        });
+        const options = Array.from(valSet).sort();
+        return { column, options };
+      })
+      .filter((item) => item.options.length > 0 && item.options.length <= 200);
+  }, [allExcelColumnNames, records]);
+
+  // Apply dynamic filters (both standard and exact Excel column filters) + real-time search
   const filteredRecords = useMemo(() => {
     return records.filter((rec) => {
       if (filters.especie !== 'Todas' && rec.especie !== filters.especie) {
         return false;
       }
-      if (filters.municipio !== 'Todos' && rec.municipio !== filters.municipio) {
+      if (
+        filters.municipio !== 'Todos' &&
+        rec.municipio !== filters.municipio
+      ) {
         return false;
       }
       if (
@@ -171,9 +204,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (filters.fechaFin && rec.fecha > filters.fechaFin) {
         return false;
       }
+
+      // Check dynamic custom Excel field filters
+      for (const [colName, selectedVal] of Object.entries(
+        filters.customFields
+      )) {
+        if (selectedVal && selectedVal !== 'Todos') {
+          const recordVal = rec.rawFields?.[colName] ?? '';
+          if (recordVal !== selectedVal) {
+            return false;
+          }
+        }
+      }
+
       if (filters.search.trim()) {
         const q = filters.search.toLowerCase().trim();
-        const match =
+        const standardMatch =
           rec.especie.toLowerCase().includes(q) ||
           rec.municipio.toLowerCase().includes(q) ||
           rec.parroquia.toLowerCase().includes(q) ||
@@ -181,13 +227,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           rec.puntoDistribucion.toLowerCase().includes(q) ||
           rec.archivoOrigen.toLowerCase().includes(q) ||
           rec.fecha.includes(q);
-        if (!match) return false;
+
+        const rawMatch = rec.rawFields
+          ? Object.values(rec.rawFields).some((v) =>
+              String(v).toLowerCase().includes(q)
+            )
+          : false;
+
+        if (!standardMatch && !rawMatch) return false;
       }
       return true;
     });
   }, [records, filters]);
 
-  // Compute KPI Metrics from filtered records
+  // Compute KPI Metrics (0 when no Excel uploaded)
   const kpiMetrics = useMemo(() => {
     const totalToneladas = filteredRecords.reduce(
       (acc, r) => acc + r.toneladas,
@@ -204,7 +257,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const avgKgPerFamily =
       totalFamilias > 0 ? +(totalKilogramos / totalFamilias).toFixed(2) : 0;
     const goalPct =
-      regionalGoalTons > 0
+      regionalGoalTons > 0 && totalToneladas > 0
         ? Math.min(100, +((totalToneladas / regionalGoalTons) * 100).toFixed(1))
         : 0;
 
@@ -220,14 +273,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [filteredRecords, regionalGoalTons]);
 
-  // 1. Bar Chart Data (by Species or by Municipality)
+  // 1. Bar Chart Data (supports grouping by Especie, Municipio, or any detected Excel column!)
   const barChartData = useMemo(() => {
     const map = new Map<
       string,
       { name: string; toneladas: number; familias: number }
     >();
     filteredRecords.forEach((r) => {
-      const key = barChartMode === 'especie' ? r.especie : r.municipio;
+      let key = '';
+      if (barChartMode === 'especie') {
+        key = r.especie;
+      } else if (barChartMode === 'municipio') {
+        key = r.municipio;
+      } else {
+        key = r.rawFields?.[barChartMode] || 'Sin Especificar';
+      }
       const existing = map.get(key) || { name: key, toneladas: 0, familias: 0 };
       existing.toneladas = +(existing.toneladas + r.toneladas).toFixed(2);
       existing.familias += r.familiasBeneficiadas;
@@ -248,7 +308,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     sortedByDate.forEach((r) => {
       const key = r.fecha;
-      const existing = map.get(key) || { fecha: key, toneladas: 0, acumulado: 0 };
+      const existing = map.get(key) || {
+        fecha: key,
+        toneladas: 0,
+        acumulado: 0,
+      };
       existing.toneladas = +(existing.toneladas + r.toneladas).toFixed(2);
       map.set(key, existing);
     });
@@ -311,16 +375,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
-  const scrollToSection = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-24">
-      {/* Hidden input for Top Bar quick upload */}
+      {/* Hidden input for quick Excel file upload */}
       <input
         ref={quickFileInputRef}
         type="file"
@@ -335,73 +392,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         className="hidden"
       />
 
-      {/* Top Bar Contract: 3 Zones separated by gap-8 */}
+      {/* Top Bar: Left "Venezue Come Pescado" + Right 2 Action Buttons: 1) Inicio 2) Filtros */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5">
         <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-8">
-          {/* Zone 1: Single text element wordmark */}
+          {/* Top-left text requested by user */}
           <button
             type="button"
             onClick={onBackToHero}
             className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 hover:text-cyan-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            Venezuela Come + Pescado
+            Venezue Come Pescado
           </button>
 
-          {/* Zone 2: 5 clean single-line text navigation links */}
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+          {/* Right: Only 2 Action Buttons: 1) Inicio  2) Filtros */}
+          <div className="flex items-center gap-3 shrink-0">
             <button
               type="button"
               onClick={onBackToHero}
-              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              Inicio
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('seccion-kpis')}
-              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Indicadores
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('seccion-mapa')}
-              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Mapa Barinas
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('seccion-graficos')}
-              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Gráficos
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('seccion-tabla')}
-              className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Registros
-            </button>
-          </nav>
-
-          {/* Zone 3: 1 primary action (plus mobile drawer trigger on < lg) */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => quickFileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Adjuntar Excel</span>
+              <Home className="w-3.5 h-3.5 text-cyan-700" />
+              <span>Inicio</span>
             </button>
 
             <button
               type="button"
               onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Abrir panel de control y filtros"
-              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>Filtros</span>
@@ -412,40 +429,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Main Container */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-8 pt-6">
-        {/* Top Banner Superior */}
+        {/* Top Central Banner with Attached Photographs */}
         <DashboardBanner />
 
-        {/* Demo Data Notice Banner */}
-        {isUsingDemoData && (
+        {/* Zero-Data State Notice: Ready to attach Excel file */}
+        {records.length === 0 && (
           <div
             role="status"
-            className="mb-6 rounded-xl bg-amber-50/90 border border-amber-200/90 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            className="mb-6 rounded-xl bg-cyan-950 text-white px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm"
           >
-            <div className="flex items-start sm:items-center gap-3">
-              <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center shrink-0">
+                <FileSpreadsheet className="w-5 h-5 text-cyan-300" />
+              </div>
               <div>
-                <p className="text-xs sm:text-sm font-bold text-amber-950">
-                  Mostrando datos de ejemplo - Sube un archivo Excel para actualizar
+                <p className="text-sm font-bold text-white">
+                  Indicadores en cero (0) — Listo para cargar tu archivo Excel
                 </p>
-                <p className="text-xs text-amber-800">
-                  Visualizando registros demostrativos de pesca y acuicultura en la Región Barinas. Puedes subir un archivo Excel, registrar jornadas manualmente o editar cualquier fila.
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Adjunta tu reporte en formato Excel (.xlsx / .xls) para calcular automáticamente las métricas, habilitar los filtros de tus columnas y generar las gráficas.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => downloadSampleExcelTemplate(1)}
-                className="px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="px-3.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                Descargar Excel de Ejemplo
+                Descargar Formato Ejemplo
               </button>
               <button
                 type="button"
                 onClick={() => quickFileInputRef.current?.click()}
-                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
               >
-                Subir Excel Ahora
+                <Upload className="w-3.5 h-3.5" />
+                <span>Adjuntar Archivo Excel</span>
               </button>
             </div>
           </div>
@@ -455,7 +475,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-col lg:flex-row items-start gap-6">
           {/* Área Central (Izquierda/Centro en Desktop, Superior en Móvil) */}
           <div className="flex-1 min-w-0 w-full space-y-6">
-            {/* 1. Tarjetas Superiores de KPIs + Meta Mensual */}
+            {/* 1. Tarjetas Superiores de KPIs (Inician en 0 hasta subir Excel) */}
             <section
               id="seccion-kpis"
               aria-label="Indicadores Clave de Desempeño"
@@ -495,7 +515,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 truncate">
                     <span>Líder:</span>
                     <span className="font-semibold text-slate-700 truncate">
-                      {barChartData[0]?.name || 'N/A'}
+                      {barChartData[0]?.name || 'Sin datos (0)'}
                     </span>
                   </div>
                 </div>
@@ -521,7 +541,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 </div>
 
-                {/* KPI 4: Archivos Cargados & Promedio Proteico */}
+                {/* KPI 4: Archivos Cargados */}
                 <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
                   <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
                     <span>Archivos Cargados</span>
@@ -596,13 +616,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-cyan-500 to-sky-600 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.max(3, kpiMetrics.goalPct)}%` }}
+                      style={{ width: `${kpiMetrics.goalPct}%` }}
                     />
                   </div>
                 </div>
 
-                {/* Botones Ejecutivos: Registrar Jornada Manual e Informe Ejecutivo */}
                 <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => quickFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Adjuntar Excel</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {
@@ -629,7 +657,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* 2. Mapa Interactivo del Estado Barinas y Semáforo Municipal */}
             <BarinasMap
-              records={records}
+              records={filteredRecords}
               selectedMunicipio={filters.municipio}
               onSelectMunicipio={(municipio) => {
                 onUpdateFilters({ municipio });
@@ -644,7 +672,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               aria-label="Visualizaciones analíticas"
               className="space-y-6"
             >
-              {/* Gráfico Principal de Barras: Volumen por Especie / Municipio */}
+              {/* Gráfico Principal de Barras: Volumen por Especie / Municipio / Campo del Excel */}
               <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                   <div>
@@ -652,51 +680,72 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       Volumen de Producción y Distribución (Toneladas Métricas)
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Comparativa acumulada según filtro activo en el Observatorio Regional
+                      Comparativa acumulada según los campos del archivo Excel cargado
                     </p>
                   </div>
 
-                  {/* Interactive Segmented Control */}
-                  <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg self-start sm:self-auto">
-                    <button
-                      type="button"
-                      onClick={() => setBarChartMode('especie')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                        barChartMode === 'especie'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Por Especie
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBarChartMode('municipio')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                        barChartMode === 'municipio'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Por Municipio
-                    </button>
+                  {/* Interactive Group-By Selector (including detected Excel columns!) */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setBarChartMode('especie')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          barChartMode === 'especie'
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Por Especie
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBarChartMode('municipio')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          barChartMode === 'municipio'
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Por Municipio
+                      </button>
+                    </div>
+
+                    {dynamicExcelColumns.length > 0 && (
+                      <select
+                        aria-label="Agrupar gráfico por campo del Excel"
+                        value={barChartMode}
+                        onChange={(e) => setBarChartMode(e.target.value)}
+                        className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none"
+                      >
+                        <option value="especie">Campo: Especie</option>
+                        <option value="municipio">Campo: Municipio</option>
+                        {dynamicExcelColumns.map((col) => (
+                          <option key={col.column} value={col.column}>
+                            Campo Excel: {col.column}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </div>
 
                 {barChartData.length === 0 ? (
-                  <div className="h-72 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-lg">
+                  <div className="h-72 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                    <FileSpreadsheet className="w-8 h-8 text-slate-400 mb-2" />
                     <p className="text-sm font-semibold text-slate-700 mb-1">
-                      Sin registros para los filtros seleccionados
+                      Datos en cero (0) — Sin registros cargados
                     </p>
-                    <p className="text-xs text-slate-500 mb-3">
-                      Ajusta los controles laterales o restablece los filtros para visualizar las métricas.
+                    <p className="text-xs text-slate-500 mb-4 max-w-md">
+                      Adjunta tu archivo Excel (.xlsx / .xls) para visualizar el gráfico de barras con los datos de la jornada.
                     </p>
                     <button
                       type="button"
-                      onClick={onResetFilters}
-                      className="px-3.5 py-1.5 rounded-lg bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-700 transition-colors cursor-pointer"
+                      onClick={() => quickFileInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-700 transition-colors cursor-pointer"
                     >
-                      Restablecer filtros
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Adjuntar archivo Excel</span>
                     </button>
                   </div>
                 ) : (
@@ -760,13 +809,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       Evolución Temporal de Captura y Jornadas
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Toneladas registradas por fecha y curva de crecimiento acumulado en Barinas
+                      Toneladas registradas por fecha y curva de crecimiento acumulado
                     </p>
                   </div>
 
                   {timeSeriesData.length === 0 ? (
-                    <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg text-xs text-slate-500">
-                      Sin datos temporales disponibles con el filtro actual
+                    <div className="h-64 flex flex-col items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500 p-4 text-center">
+                      <span>Gráfico en 0 — Adjunta un archivo Excel para graficar la evolución temporal</span>
                     </div>
                   ) : (
                     <div className="h-64 sm:h-72 w-full">
@@ -818,7 +867,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             }}
                           />
                           <Legend
-                            wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }}
+                            wrapperStyle={{
+                              fontSize: '12px',
+                              paddingTop: '8px',
+                            }}
                           />
                           <Area
                             type="monotone"
@@ -883,8 +935,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
 
                   {donutChartData.length === 0 ? (
-                    <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg text-xs text-slate-500">
-                      Sin datos para calcular distribución
+                    <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500 p-4 text-center">
+                      <span>Distribución en 0% — Sube tu archivo Excel para calcular proporciones</span>
                     </div>
                   ) : (
                     <div className="h-64 sm:h-72 w-full">
@@ -941,7 +993,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </section>
 
-            {/* 4. Tabla de Datos Paginada con Buscador en Tiempo Real + Edición/Eliminación */}
+            {/* 4. Tabla de Datos Paginada con Columnas del Formato Excel Adjuntado */}
             <section
               id="seccion-tabla"
               aria-label="Tabla de registros acumulados"
@@ -951,7 +1003,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                    Registro Consolidado del Observatorio Pesquero
+                    Registro Consolidado del Formato Excel
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Mostrando{' '}
@@ -962,13 +1014,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span className="font-mono tabular-nums font-semibold text-slate-800">
                       {records.length}
                     </span>{' '}
-                    registros totales en memoria
+                    registros cargados
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
+                  {allExcelColumnNames.length > 0 && (
+                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setTableViewMode('excel')}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+                          tableViewMode === 'excel'
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Campos del Excel ({allExcelColumnNames.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTableViewMode('estandar')}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+                          tableViewMode === 'estandar'
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Vista Resumen
+                      </button>
+                    </div>
+                  )}
+
                   {/* Buscador en tiempo real */}
-                  <div className="relative min-w-[220px] sm:min-w-[250px] flex-1 sm:flex-none">
+                  <div className="relative min-w-[210px] sm:min-w-[240px] flex-1 sm:flex-none">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="search"
@@ -977,22 +1056,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         onUpdateFilters({ search: e.target.value });
                         setCurrentPage(1);
                       }}
-                      placeholder="Buscar especie, municipio, parroquia..."
+                      placeholder="Buscar en cualquier campo del Excel..."
                       className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs text-slate-900 placeholder:text-slate-400 focus:border-cyan-600 focus:bg-white focus:outline-none"
                     />
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingRecord(null);
-                      setRecordModalOpen(true);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Nueva Fila</span>
-                  </button>
 
                   {/* Export Consolidated Data Button */}
                   <button
@@ -1009,167 +1076,237 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* High-Density Data Grid */}
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
-                      <th className="py-3 px-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('fecha')}
-                          className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
-                        >
-                          <span>Fecha</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('especie')}
-                          className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
-                        >
-                          <span>Especie</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('municipio')}
-                          className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
-                        >
-                          <span>Municipio / Parroquia</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('tipoPesca')}
-                          className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
-                        >
-                          <span>Modalidad</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('toneladas')}
-                          className="inline-flex items-center justify-end gap-1 hover:text-slate-900 cursor-pointer ml-auto"
-                        >
-                          <span>Volumen (TM)</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleSort('familiasBeneficiadas')}
-                          className="inline-flex items-center justify-end gap-1 hover:text-slate-900 cursor-pointer ml-auto"
-                        >
-                          <span>Familias</span>
-                          <ArrowUpDown className="w-3 h-3" />
-                        </button>
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap">
-                        Punto / Origen
-                      </th>
-                      <th className="py-3 px-4 whitespace-nowrap text-right">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200/70 text-xs">
-                    {paginatedRecords.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="py-12 px-4 text-center text-slate-500"
-                        >
-                          No se encontraron registros que coincidan con la búsqueda o filtros activos.
-                        </td>
+                {tableViewMode === 'excel' && allExcelColumnNames.length > 0 ? (
+                  /* Dynamic Table Showing Exact Columns from Uploaded Excel */
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
+                        {allExcelColumnNames.map((col) => (
+                          <th key={col} className="py-3 px-4 whitespace-nowrap">
+                            {col}
+                          </th>
+                        ))}
+                        <th className="py-3 px-4 whitespace-nowrap text-right">
+                          Acciones
+                        </th>
                       </tr>
-                    ) : (
-                      paginatedRecords.map((row) => (
-                        <tr
-                          key={row.id}
-                          className="hover:bg-cyan-50/40 transition-colors"
-                        >
-                          <td className="py-3 px-4 font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                            {row.fecha}
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-slate-900 whitespace-nowrap">
-                            {row.especie}
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="font-medium text-slate-800">
-                              {row.municipio}
-                            </span>
-                            <span
-                              className="text-slate-400 mx-1.5"
-                              aria-hidden="true"
-                            >
-                              ·
-                            </span>
-                            <span className="text-slate-500">
-                              {row.parroquia}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                            {row.tipoPesca}
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-cyan-800 whitespace-nowrap">
-                            {row.toneladas.toFixed(2)} TM
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                            {row.familiasBeneficiadas.toLocaleString('es-VE')}
-                          </td>
-                          <td className="py-3 px-4 text-slate-500 max-w-[190px] truncate">
-                            <span title={row.puntoDistribucion}>
-                              {row.puntoDistribucion}
-                            </span>
-                            <span
-                              className="mx-1.5 text-slate-300"
-                              aria-hidden="true"
-                            >
-                              /
-                            </span>
-                            <span
-                              className="text-[11px] text-slate-400"
-                              title={row.archivoOrigen}
-                            >
-                              {row.archivoOrigen}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingRecord(row);
-                                  setRecordModalOpen(true);
-                                }}
-                                title="Editar fila"
-                                className="p-1.5 rounded text-slate-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors cursor-pointer"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onDeleteRecord(row.id)}
-                                title="Eliminar fila"
-                                className="p-1.5 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/70 text-xs">
+                      {paginatedRecords.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={allExcelColumnNames.length + 1}
+                            className="py-12 px-4 text-center text-slate-500"
+                          >
+                            No hay registros que coincidan con los filtros seleccionados.
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        paginatedRecords.map((row) => (
+                          <tr
+                            key={row.id}
+                            className="hover:bg-cyan-50/40 transition-colors"
+                          >
+                            {allExcelColumnNames.map((col) => (
+                              <td
+                                key={col}
+                                className="py-3 px-4 text-slate-800 whitespace-nowrap font-mono tabular-nums"
+                              >
+                                {row.rawFields?.[col] ?? '-'}
+                              </td>
+                            ))}
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingRecord(row);
+                                    setRecordModalOpen(true);
+                                  }}
+                                  title="Editar fila"
+                                  className="p-1.5 rounded text-slate-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteRecord(row.id)}
+                                  title="Eliminar fila"
+                                  className="p-1.5 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  /* Standard Summary Table */
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
+                        <th className="py-3 px-4 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('fecha')}
+                            className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                          >
+                            <span>Fecha</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('especie')}
+                            className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                          >
+                            <span>Especie</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('municipio')}
+                            className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                          >
+                            <span>Municipio / Parroquia</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('tipoPesca')}
+                            className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                          >
+                            <span>Modalidad</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('toneladas')}
+                            className="inline-flex items-center justify-end gap-1 hover:text-slate-900 cursor-pointer ml-auto"
+                          >
+                            <span>Volumen (TM)</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSort('familiasBeneficiadas')}
+                            className="inline-flex items-center justify-end gap-1 hover:text-slate-900 cursor-pointer ml-auto"
+                          >
+                            <span>Familias</span>
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap">
+                          Punto / Origen
+                        </th>
+                        <th className="py-3 px-4 whitespace-nowrap text-right">
+                          Acciones
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/70 text-xs">
+                      {paginatedRecords.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="py-12 px-4 text-center text-slate-500"
+                          >
+                            Tabla en cero (0) — Adjunta un archivo Excel para mostrar los registros.
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedRecords.map((row) => (
+                          <tr
+                            key={row.id}
+                            className="hover:bg-cyan-50/40 transition-colors"
+                          >
+                            <td className="py-3 px-4 font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                              {row.fecha}
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-slate-900 whitespace-nowrap">
+                              {row.especie}
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <span className="font-medium text-slate-800">
+                                {row.municipio}
+                              </span>
+                              <span
+                                className="text-slate-400 mx-1.5"
+                                aria-hidden="true"
+                              >
+                                ·
+                              </span>
+                              <span className="text-slate-500">
+                                {row.parroquia}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
+                              {row.tipoPesca}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-cyan-800 whitespace-nowrap">
+                              {row.toneladas.toFixed(2)} TM
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                              {row.familiasBeneficiadas.toLocaleString('es-VE')}
+                            </td>
+                            <td className="py-3 px-4 text-slate-500 max-w-[190px] truncate">
+                              <span title={row.puntoDistribucion}>
+                                {row.puntoDistribucion}
+                              </span>
+                              <span
+                                className="mx-1.5 text-slate-300"
+                                aria-hidden="true"
+                              >
+                                /
+                              </span>
+                              <span
+                                className="text-[11px] text-slate-400"
+                                title={row.archivoOrigen}
+                              >
+                                {row.archivoOrigen}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingRecord(row);
+                                    setRecordModalOpen(true);
+                                  }}
+                                  title="Editar fila"
+                                  className="p-1.5 rounded text-slate-500 hover:text-cyan-700 hover:bg-cyan-50 transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteRecord(row.id)}
+                                  title="Eliminar fila"
+                                  className="p-1.5 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
               {/* Pagination Footer */}
@@ -1240,6 +1377,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             availableSpecies={availableSpecies}
             availableMunicipios={availableMunicipios}
             availableTiposPesca={availableTiposPesca}
+            dynamicExcelColumns={dynamicExcelColumns}
             isUploading={isUploading}
             uploadFeedback={uploadFeedback}
             mobileOpen={mobileSidebarOpen}

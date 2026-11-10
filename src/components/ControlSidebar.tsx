@@ -25,6 +25,8 @@ interface ControlSidebarProps {
   availableSpecies: string[];
   availableMunicipios: string[];
   availableTiposPesca: string[];
+  /** Dynamic columns and their unique values extracted from the attached Excel file(s) */
+  dynamicExcelColumns: { column: string; options: string[] }[];
   isUploading: boolean;
   uploadFeedback: { type: 'success' | 'error'; message: string } | null;
   mobileOpen: boolean;
@@ -42,6 +44,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   availableSpecies,
   availableMunicipios,
   availableTiposPesca,
+  dynamicExcelColumns,
   isUploading,
   uploadFeedback,
   mobileOpen,
@@ -87,16 +90,28 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
     onUpdateFilters({ tipoPesca: updated });
   };
 
+  const handleCustomFieldChange = (colName: string, value: string) => {
+    const nextCustom = { ...filters.customFields };
+    if (!value || value === 'Todos') {
+      delete nextCustom[colName];
+    } else {
+      nextCustom[colName] = value;
+    }
+    onUpdateFilters({ customFields: nextCustom });
+  };
+
+  const activeCustomCount = Object.keys(filters.customFields).length;
   const activeFilterCount =
     (filters.especie !== 'Todas' ? 1 : 0) +
     (filters.municipio !== 'Todos' ? 1 : 0) +
     (filters.archivoOrigen !== 'Todos' ? 1 : 0) +
     (filters.fechaInicio ? 1 : 0) +
     (filters.fechaFin ? 1 : 0) +
-    filters.tipoPesca.length;
+    filters.tipoPesca.length +
+    activeCustomCount;
 
   const sidebarContent = (
-    <div className="flex flex-col gap-6">
+    <div id="panel-control-filtros" className="flex flex-col gap-6">
       {/* 1. Módulo de Carga Acumulativa de Excel */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
         <div className="flex items-center justify-between gap-2 mb-3">
@@ -104,13 +119,14 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             Carga Acumulativa Excel
           </h3>
           <span className="text-xs font-mono tabular-nums text-cyan-700 font-semibold">
-            {uploadedFiles.length} {uploadedFiles.length === 1 ? 'archivo' : 'archivos'}
+            {uploadedFiles.length}{' '}
+            {uploadedFiles.length === 1 ? 'archivo' : 'archivos'}
           </span>
         </div>
 
         <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-          Sube uno o varios reportes Excel. Los registros se suman automáticamente
-          al consolidado actual sin borrar cargas anteriores.
+          Adjunta tu archivo Excel (.xlsx / .xls). Los campos del formato se
+          detectan automáticamente para generar los filtros y gráficas.
         </p>
 
         {/* Dropzone */}
@@ -163,7 +179,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
           className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
         >
           <Download className="w-3.5 h-3.5 text-cyan-700 shrink-0" />
-          <span>Descargar plantilla de prueba (.xlsx)</span>
+          <span>Descargar formato Excel de ejemplo (.xlsx)</span>
         </button>
 
         {/* Feedback Toast inside module */}
@@ -201,7 +217,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <div className="py-4 px-3 rounded-lg bg-slate-50 text-center">
               <FileSpreadsheet className="w-5 h-5 text-slate-400 mx-auto mb-1" />
               <p className="text-xs text-slate-500">
-                Ningún archivo cargado aún. Se muestran datos de demostración de Barinas.
+                Datos en cero (0). Adjunta un archivo Excel para cargar los indicadores y habilitar todos los campos de filtro.
               </p>
             </div>
           ) : (
@@ -252,12 +268,12 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                   className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Limpiar historial de datos</span>
+                  <span>Limpiar historial de datos (Dejar en 0)</span>
                 </button>
               ) : (
                 <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 space-y-2">
                   <p className="text-[11px] text-rose-900 font-medium text-center">
-                    ¿Confirmas eliminar los archivos acumulados y restaurar la vista inicial?
+                    ¿Confirmas eliminar los archivos acumulados y dejar todos los datos en cero?
                   </p>
                   <div className="flex items-center gap-2">
                     <button
@@ -285,13 +301,13 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         </div>
       </div>
 
-      {/* 2. Sección de Filtros Dinámicos */}
+      {/* 2. Sección de Filtros Dinámicos por Campos del Excel */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-cyan-700" />
             <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-              Filtros Analíticos
+              Filtros del Formato Excel
             </h3>
           </div>
           {activeFilterCount > 0 && (
@@ -307,13 +323,45 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         </div>
 
         <div className="space-y-4">
-          {/* Select Especie */}
+          {/* Dynamic filters generated directly from every column in the uploaded Excel file */}
+          {dynamicExcelColumns.length > 0 && (
+            <div className="space-y-3 pb-3 border-b border-slate-100">
+              <span className="block text-[11px] font-semibold text-cyan-800">
+                Campos detectados en el Excel adjuntado ({dynamicExcelColumns.length})
+              </span>
+              {dynamicExcelColumns.map(({ column, options }) => (
+                <div key={column}>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {column}
+                  </label>
+                  <select
+                    value={filters.customFields[column] || 'Todos'}
+                    onChange={(e) =>
+                      handleCustomFieldChange(column, e.target.value)
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  >
+                    <option value="Todos">
+                      Todos ({options.length})
+                    </option>
+                    {options.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Standard Filters (Especie, Municipio, Fecha, Modalidad) */}
           <div>
             <label
               htmlFor="filter-especie"
               className="block text-xs font-semibold text-slate-700 mb-1.5"
             >
-              Especie Hidrobiológica
+              Especie / Rubro
             </label>
             <select
               id="filter-especie"
@@ -321,7 +369,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               onChange={(e) => onUpdateFilters({ especie: e.target.value })}
               className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
             >
-              <option value="Todas">Todas las especies ({availableSpecies.length})</option>
+              <option value="Todas">
+                Todas las especies ({availableSpecies.length})
+              </option>
               {availableSpecies.map((esp) => (
                 <option key={esp} value={esp}>
                   {esp}
@@ -330,7 +380,6 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             </select>
           </div>
 
-          {/* Select Municipio */}
           <div>
             <label
               htmlFor="filter-municipio"
@@ -344,7 +393,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               onChange={(e) => onUpdateFilters({ municipio: e.target.value })}
               className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
             >
-              <option value="Todos">Todos los municipios ({availableMunicipios.length})</option>
+              <option value="Todos">
+                Todos los municipios ({availableMunicipios.length})
+              </option>
               {availableMunicipios.map((mun) => (
                 <option key={mun} value={mun}>
                   {mun}
@@ -353,7 +404,6 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             </select>
           </div>
 
-          {/* Select Archivo de Origen (si hay más de 1 archivo) */}
           {uploadedFiles.length > 1 && (
             <div>
               <label
@@ -365,7 +415,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               <select
                 id="filter-archivo"
                 value={filters.archivoOrigen}
-                onChange={(e) => onUpdateFilters({ archivoOrigen: e.target.value })}
+                onChange={(e) =>
+                  onUpdateFilters({ archivoOrigen: e.target.value })
+                }
                 className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
               >
                 <option value="Todos">Todos los archivos acumulados</option>
@@ -386,26 +438,36 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             </span>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label htmlFor="fecha-inicio" className="block text-[11px] text-slate-500 mb-1">
+                <label
+                  htmlFor="fecha-inicio"
+                  className="block text-[11px] text-slate-500 mb-1"
+                >
                   Desde
                 </label>
                 <input
                   id="fecha-inicio"
                   type="date"
                   value={filters.fechaInicio}
-                  onChange={(e) => onUpdateFilters({ fechaInicio: e.target.value })}
+                  onChange={(e) =>
+                    onUpdateFilters({ fechaInicio: e.target.value })
+                  }
                   className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
                 />
               </div>
               <div>
-                <label htmlFor="fecha-fin" className="block text-[11px] text-slate-500 mb-1">
+                <label
+                  htmlFor="fecha-fin"
+                  className="block text-[11px] text-slate-500 mb-1"
+                >
                   Hasta
                 </label>
                 <input
                   id="fecha-fin"
                   type="date"
                   value={filters.fechaFin}
-                  onChange={(e) => onUpdateFilters({ fechaFin: e.target.value })}
+                  onChange={(e) =>
+                    onUpdateFilters({ fechaFin: e.target.value })
+                  }
                   className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
                 />
               </div>
@@ -413,36 +475,38 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
           </div>
 
           {/* Casillas de Verificación: Tipo de Pesca / Modalidad */}
-          <div>
-            <span className="block text-xs font-semibold text-slate-700 mb-2">
-              Modalidad / Tipo de Pesca
-            </span>
-            <div className="space-y-1.5">
-              {availableTiposPesca.map((tipo) => {
-                const checked = filters.tipoPesca.includes(tipo);
-                return (
-                  <label
-                    key={tipo}
-                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                      checked
-                        ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
-                        : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleTipoPesca(tipo)}
-                        className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                      />
-                      <span className="truncate">{tipo}</span>
-                    </div>
-                  </label>
-                );
-              })}
+          {availableTiposPesca.length > 0 && (
+            <div>
+              <span className="block text-xs font-semibold text-slate-700 mb-2">
+                Modalidad / Operativo
+              </span>
+              <div className="space-y-1.5">
+                {availableTiposPesca.map((tipo) => {
+                  const checked = filters.tipoPesca.includes(tipo);
+                  return (
+                    <label
+                      key={tipo}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
+                          : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleTipoPesca(tipo)}
+                          className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                        />
+                        <span className="truncate">{tipo}</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -458,9 +522,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         <div className="sticky top-20">{sidebarContent}</div>
       </aside>
 
-      {/* Mobile & Tablet Slide-Over Drawer */}
+      {/* Slide-Over Drawer for Mobile, Tablet, or when "Filtros" button is clicked */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
+        <div className="fixed inset-0 z-50 flex justify-end">
           <div
             className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
             onClick={onCloseMobile}
@@ -468,7 +532,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
           <div className="relative z-10 w-full max-w-sm bg-slate-50 h-full overflow-y-auto p-4 pb-20 shadow-2xl border-l border-slate-200">
             <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
               <span className="text-sm font-bold text-slate-900">
-                Control de Datos y Filtros
+                Carga de Excel y Filtros
               </span>
               <button
                 type="button"

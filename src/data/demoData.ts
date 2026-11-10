@@ -1,253 +1,10 @@
 import * as XLSX from 'xlsx';
 import { FisheryRecord } from '../types/fishery';
 
-export const DEMO_RECORDS: FisheryRecord[] = [
-  {
-    id: 'demo-1',
-    fecha: '2026-01-14',
-    especie: 'Cachama Negra',
-    municipio: 'Barinas',
-    parroquia: 'Alto Barinas',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 4.85,
-    familiasBeneficiadas: 1210,
-    puntoDistribucion: 'Plaza Bolívar / Feria Soberana',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-2',
-    fecha: '2026-01-22',
-    especie: 'Coporo',
-    municipio: 'Pedraza',
-    parroquia: 'Ciudad Bolivia',
-    tipoPesca: 'Acuicultura Continental',
-    toneladas: 6.20,
-    familiasBeneficiadas: 1550,
-    puntoDistribucion: 'Centro Acuícola Ticoporo',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-3',
-    fecha: '2026-02-05',
-    especie: 'Bagre Rayado',
-    municipio: 'Sosa',
-    parroquia: 'Puerto de Nutrias',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 3.40,
-    familiasBeneficiadas: 850,
-    puntoDistribucion: 'Muelle Pesquero Río Apure',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-4',
-    fecha: '2026-02-12',
-    especie: 'Pavón Cinchado',
-    municipio: 'Rojas',
-    parroquia: 'Libertad',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 2.15,
-    familiasBeneficiadas: 540,
-    puntoDistribucion: 'Corredor Vial Masparro',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-5',
-    fecha: '2026-02-19',
-    especie: 'Cachama Negra',
-    municipio: 'Alberto Arvelo Torrealba',
-    parroquia: 'Sabaneta',
-    tipoPesca: 'Acuicultura Continental',
-    toneladas: 5.60,
-    familiasBeneficiadas: 1400,
-    puntoDistribucion: 'Red Productiva Sabaneta',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-6',
-    fecha: '2026-03-04',
-    especie: 'Palometa Llanera',
-    municipio: 'Arismendi',
-    parroquia: 'Arismendi',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 3.95,
-    familiasBeneficiadas: 980,
-    puntoDistribucion: 'Ribera Río Guanare Viejo',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-7',
-    fecha: '2026-03-15',
-    especie: 'Coporo',
-    municipio: 'Barinas',
-    parroquia: 'Corazón de Jesús',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 5.10,
-    familiasBeneficiadas: 1275,
-    puntoDistribucion: 'Complejo Hab. Ciudad Tavacare',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-8',
-    fecha: '2026-03-26',
-    especie: 'Curito',
-    municipio: 'Obispos',
-    parroquia: 'Obispos',
-    tipoPesca: 'Centro de Acopio',
-    toneladas: 2.80,
-    familiasBeneficiadas: 700,
-    puntoDistribucion: 'Centro Comunal El Real',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-9',
-    fecha: '2026-04-08',
-    especie: 'Bagre Rayado',
-    municipio: 'Ezequiel Zamora',
-    parroquia: 'Santa Bárbara',
-    tipoPesca: 'Centro de Acopio',
-    toneladas: 4.30,
-    familiasBeneficiadas: 1075,
-    puntoDistribucion: 'Mercado Municipal Sur',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-10',
-    fecha: '2026-04-18',
-    especie: 'Cachama Negra',
-    municipio: 'Antonio José de Sucre',
-    parroquia: 'Ticoporo',
-    tipoPesca: 'Acuicultura Continental',
-    toneladas: 7.15,
-    familiasBeneficiadas: 1790,
-    puntoDistribucion: 'Eje Piscícola Socopó',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-11',
-    fecha: '2026-05-03',
-    especie: 'Morocoto',
-    municipio: 'Pedraza',
-    parroquia: 'José Félix Ribas',
-    tipoPesca: 'Acuicultura Continental',
-    toneladas: 3.75,
-    familiasBeneficiadas: 940,
-    puntoDistribucion: 'Granja Integral Capitanejo',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-12',
-    fecha: '2026-05-16',
-    especie: 'Coporo',
-    municipio: 'Rojas',
-    parroquia: 'Dolores',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 4.45,
-    familiasBeneficiadas: 1110,
-    puntoDistribucion: 'Cancha Techada Dolores',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-13',
-    fecha: '2026-06-02',
-    especie: 'Pavón Cinchado',
-    municipio: 'Cruz Paredes',
-    parroquia: 'Barrancas',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 2.90,
-    familiasBeneficiadas: 725,
-    puntoDistribucion: 'Corredor Comunal Barrancas',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-14',
-    fecha: '2026-06-19',
-    especie: 'Bagre Rayado',
-    municipio: 'Sosa',
-    parroquia: 'Ciudad de Nutrias',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 5.25,
-    familiasBeneficiadas: 1310,
-    puntoDistribucion: 'CONPPA Río Apure',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-15',
-    fecha: '2026-07-07',
-    especie: 'Cachama Negra',
-    municipio: 'Barinas',
-    parroquia: 'Ramón Ignacio Méndez',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 6.80,
-    familiasBeneficiadas: 1700,
-    puntoDistribucion: 'Base de Misiones Punta Gorda',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-16',
-    fecha: '2026-07-23',
-    especie: 'Palometa Llanera',
-    municipio: 'Andrés Eloy Blanco',
-    parroquia: 'El Cantón',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 3.15,
-    familiasBeneficiadas: 790,
-    puntoDistribucion: 'Paso Río Caparo',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-17',
-    fecha: '2026-08-11',
-    especie: 'Coporo',
-    municipio: 'Bolívar',
-    parroquia: 'Barinitas',
-    tipoPesca: 'Feria / Jornada Social',
-    toneladas: 4.10,
-    familiasBeneficiadas: 1025,
-    puntoDistribucion: 'Plaza Bolívar de Barinitas',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-18',
-    fecha: '2026-08-27',
-    especie: 'Curito',
-    municipio: 'Arismendi',
-    parroquia: 'San Antonio',
-    tipoPesca: 'Pesca Artesanal Fluvial',
-    toneladas: 2.65,
-    familiasBeneficiadas: 660,
-    puntoDistribucion: 'Eje Fluvial San Antonio',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-19',
-    fecha: '2026-09-09',
-    especie: 'Cachama Negra',
-    municipio: 'Pedraza',
-    parroquia: 'Ciudad Bolivia',
-    tipoPesca: 'Acuicultura Continental',
-    toneladas: 6.95,
-    familiasBeneficiadas: 1740,
-    puntoDistribucion: 'Planta Procesadora Pedraza',
-    archivoOrigen: 'Datos de Demostración',
-  },
-  {
-    id: 'demo-20',
-    fecha: '2026-09-24',
-    especie: 'Morocoto',
-    municipio: 'Barinas',
-    parroquia: 'El Carmen',
-    tipoPesca: 'Centro de Acopio',
-    toneladas: 5.40,
-    familiasBeneficiadas: 1350,
-    puntoDistribucion: 'Centro Distribución La Carolina',
-    archivoOrigen: 'Datos de Demostración',
-  },
-];
-
 /**
  * Normalizes strings for flexible Excel header matching
  */
-function normalizeKey(key: string): string {
+export function normalizeKey(key: string): string {
   return key
     .toLowerCase()
     .normalize('NFD')
@@ -261,7 +18,7 @@ function normalizeKey(key: string): string {
 function parseExcelDate(val: unknown): string {
   if (!val) return new Date().toISOString().slice(0, 10);
 
-  if (typeof val === 'number') {
+  if (typeof val === 'number' && val > 20000 && val < 80000) {
     // Excel serial date
     const utcDays = Math.floor(val - 25569);
     const utcValue = utcDays * 86400;
@@ -292,49 +49,120 @@ function parseExcelDate(val: unknown): string {
     return parsed.toISOString().slice(0, 10);
   }
 
-  return '2026-10-01';
+  return str || new Date().toISOString().slice(0, 10);
 }
 
 /**
- * Parses an uploaded Excel (.xlsx / .xls) ArrayBuffer into FisheryRecord[]
+ * Parses an uploaded Excel (.xlsx / .xls / .csv) ArrayBuffer into FisheryRecord[]
+ * and returns the exact list of column headers detected in the Excel format.
  */
 export function parseExcelBuffer(
   buffer: ArrayBuffer,
   fileName: string
-): FisheryRecord[] {
+): { records: FisheryRecord[]; columns: string[] } {
   const workbook = XLSX.read(buffer, { type: 'array' });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) return [];
 
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+  // Find the first non-empty sheet
+  let targetSheet: XLSX.WorkSheet | null = null;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (sheet && sheet['!ref']) {
+      targetSheet = sheet;
+      break;
+    }
+  }
+
+  if (!targetSheet) return { records: [], columns: [] };
+
+  // Read as 2D array first so we can locate the true header row even if there is an institutional title above it
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(targetSheet, {
+    header: 1,
     defval: '',
   });
 
-  if (!rawRows || rawRows.length === 0) return [];
+  if (!matrix || matrix.length === 0) return { records: [], columns: [] };
+
+  // Find the best header row in the first 12 rows (the row with the most non-empty string cells)
+  let headerRowIndex = 0;
+  let maxNonEmptyCells = 0;
+
+  const scanLimit = Math.min(12, matrix.length);
+  for (let r = 0; r < scanLimit; r++) {
+    const row = matrix[r];
+    if (!Array.isArray(row)) continue;
+    const nonEmptyCount = row.filter(
+      (cell) => cell !== null && cell !== undefined && String(cell).trim() !== ''
+    ).length;
+    if (nonEmptyCount > maxNonEmptyCells && nonEmptyCount >= 2) {
+      maxNonEmptyCells = nonEmptyCount;
+      headerRowIndex = r;
+    }
+  }
+
+  const rawHeaders = (matrix[headerRowIndex] || []) as unknown[];
+  const columns: string[] = [];
+  const colIndexMap: { index: number; name: string; norm: string }[] = [];
+
+  rawHeaders.forEach((h, idx) => {
+    const cleanName = String(h ?? '').trim();
+    if (cleanName && !cleanName.startsWith('__EMPTY')) {
+      // Avoid duplicate header names
+      const uniqueName = columns.includes(cleanName)
+        ? `${cleanName} (${idx + 1})`
+        : cleanName;
+      columns.push(uniqueName);
+      colIndexMap.push({
+        index: idx,
+        name: uniqueName,
+        norm: normalizeKey(uniqueName),
+      });
+    }
+  });
 
   const records: FisheryRecord[] = [];
   const timestampSeed = Date.now();
 
-  rawRows.forEach((row, index) => {
-    const entries = Object.entries(row);
-    if (entries.length === 0) return;
+  for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+    const row = matrix[r];
+    if (!Array.isArray(row)) continue;
 
-    const mapped: Record<string, unknown> = {};
-    for (const [k, v] of entries) {
-      mapped[normalizeKey(k)] = v;
+    // Skip completely empty rows or total/summary footer rows
+    const nonEmptyValues = colIndexMap
+      .map((c) => row[c.index])
+      .filter((v) => v !== null && v !== undefined && String(v).trim() !== '');
+    if (nonEmptyValues.length === 0) continue;
+
+    const firstCellStr = String(row[colIndexMap[0]?.index] ?? '')
+      .trim()
+      .toLowerCase();
+    if (
+      firstCellStr === 'total' ||
+      firstCellStr === 'totales' ||
+      firstCellStr === 'subtotal'
+    ) {
+      continue;
     }
 
-    // Flexible lookup helper
+    const rawFields: Record<string, string> = {};
+    const mappedNorm: Record<string, unknown> = {};
+
+    colIndexMap.forEach((c) => {
+      const cellVal = row[c.index];
+      const strVal =
+        cellVal !== null && cellVal !== undefined ? String(cellVal).trim() : '';
+      rawFields[c.name] = strVal;
+      mappedNorm[c.norm] = cellVal;
+    });
+
+    // Helper to find value by candidate normalized column names
     const findVal = (candidates: string[]): unknown => {
-      for (const c of candidates) {
-        if (mapped[c] !== undefined && mapped[c] !== '') {
-          return mapped[c];
+      for (const cand of candidates) {
+        if (mappedNorm[cand] !== undefined && mappedNorm[cand] !== '') {
+          return mappedNorm[cand];
         }
       }
-      // Partial match fallback
-      for (const [k, v] of Object.entries(mapped)) {
-        if (v !== '' && candidates.some((c) => k.includes(c))) {
+      for (const [k, v] of Object.entries(mappedNorm)) {
+        if (v !== '' && candidates.some((cand) => k.includes(cand))) {
           return v;
         }
       }
@@ -348,7 +176,8 @@ export function parseExcelBuffer(
       'rubro',
       'producto',
       'variedad',
-      'nombreespecie',
+      'proteina',
+      'tipo',
     ]);
     const rawMunicipio = findVal([
       'municipio',
@@ -357,36 +186,43 @@ export function parseExcelBuffer(
       'ubicacion',
       'zona',
       'entidad',
+      'territorio',
     ]);
     const rawParroquia = findVal([
       'parroquia',
       'sector',
       'comunidad',
       'circuito',
+      'comuna',
     ]);
     const rawTipo = findVal([
       'tipopesca',
-      'tipo',
       'modalidad',
       'categoria',
       'origen',
       'actividad',
+      'operativo',
+      'programa',
+      'feria',
     ]);
     const rawToneladas = findVal([
       'toneladas',
       'tonelada',
       'ton',
       'tm',
-      'peso',
       'volumen',
-      'cantidad',
+      'pesotm',
     ]);
     const rawKilos = findVal([
       'kilogramos',
       'kilos',
       'kg',
+      'peso',
       'pesokg',
       'cantidadkg',
+      'cantidad',
+      'venta',
+      'distribuido',
     ]);
     const rawFamilias = findVal([
       'familiasbeneficiadas',
@@ -395,6 +231,7 @@ export function parseExcelBuffer(
       'personas',
       'atendidos',
       'hogares',
+      'habitantes',
     ]);
     const rawFecha = findVal([
       'fecha',
@@ -403,6 +240,7 @@ export function parseExcelBuffer(
       'dia',
       'mes',
       'periodo',
+      'semana',
     ]);
     const rawPunto = findVal([
       'puntodistribucion',
@@ -410,100 +248,119 @@ export function parseExcelBuffer(
       'centro',
       'lugar',
       'mercado',
-      'feria',
+      'direccion',
+      'comunidad',
+      'conppa',
     ]);
 
     // Calculate metric tons
     let toneladas = 0;
-    if (rawToneladas !== undefined) {
+    if (rawToneladas !== undefined && String(rawToneladas).trim() !== '') {
       const parsedTon = parseFloat(
         String(rawToneladas).replace(/[^0-9.,-]/g, '').replace(',', '.')
       );
-      if (!isNaN(parsedTon)) {
-        // If user entered e.g. 2500 thinking in kg inside a generic 'cantidad' column, normalize sensibly
-        toneladas = parsedTon > 500 ? +(parsedTon / 1000).toFixed(2) : +parsedTon.toFixed(2);
+      if (!isNaN(parsedTon) && parsedTon > 0) {
+        toneladas = +parsedTon.toFixed(3);
       }
-    } else if (rawKilos !== undefined) {
+    } else if (rawKilos !== undefined && String(rawKilos).trim() !== '') {
       const parsedKg = parseFloat(
         String(rawKilos).replace(/[^0-9.,-]/g, '').replace(',', '.')
       );
-      if (!isNaN(parsedKg)) {
-        toneladas = +(parsedKg / 1000).toFixed(2);
+      if (!isNaN(parsedKg) && parsedKg > 0) {
+        // If column header explicitly says kg/kilos or number is > 50, convert kg to TM; otherwise keep as TM
+        const isExplicitKg = Object.keys(mappedNorm).some(
+          (k) => k.includes('kg') || k.includes('kilo')
+        );
+        toneladas =
+          isExplicitKg || parsedKg > 50
+            ? +(parsedKg / 1000).toFixed(3)
+            : +parsedKg.toFixed(3);
       }
     }
 
-    // Fallback if arbitrary spreadsheet without standard numeric headers
+    // Fallback numeric detection if columns have custom names
     if (toneladas <= 0) {
-      for (const [, v] of entries) {
-        const num = typeof v === 'number' ? v : parseFloat(String(v));
-        if (!isNaN(num) && num > 0 && num < 100000) {
-          toneladas = num > 500 ? +(num / 1000).toFixed(2) : +num.toFixed(2);
+      for (const c of colIndexMap) {
+        const v = row[c.index];
+        if (
+          c.norm.includes('fecha') ||
+          c.norm.includes('ano') ||
+          c.norm.includes('id') ||
+          c.norm.includes('nro') ||
+          c.norm.includes('num') ||
+          c.norm.includes('familia') ||
+          c.norm.includes('beneficiario')
+        ) {
+          continue;
+        }
+        const num =
+          typeof v === 'number'
+            ? v
+            : parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(',', '.'));
+        if (!isNaN(num) && num > 0 && num < 500000) {
+          toneladas = num > 100 ? +(num / 1000).toFixed(3) : +num.toFixed(3);
           break;
         }
       }
     }
-    if (toneladas <= 0) toneladas = 1.25;
 
     let familias = 0;
-    if (rawFamilias !== undefined) {
-      const parsedFam = parseInt(String(rawFamilias).replace(/[^0-9]/g, ''), 10);
-      if (!isNaN(parsedFam) && parsedFam > 0) {
+    if (rawFamilias !== undefined && String(rawFamilias).trim() !== '') {
+      const parsedFam = parseInt(
+        String(rawFamilias).replace(/[^0-9]/g, ''),
+        10
+      );
+      if (!isNaN(parsedFam) && parsedFam >= 0) {
         familias = parsedFam;
       }
     }
-    if (familias <= 0) {
+    if (familias <= 0 && toneladas > 0) {
       familias = Math.round(toneladas * 250);
     }
 
-    const defaultSpecies = [
-      'Cachama Negra',
-      'Coporo',
-      'Bagre Rayado',
-      'Pavón Cinchado',
-      'Palometa Llanera',
-      'Curito',
-      'Morocoto',
-    ];
-    const defaultMunicipios = [
-      'Barinas',
-      'Pedraza',
-      'Sosa',
-      'Rojas',
-      'Alberto Arvelo Torrealba',
-      'Arismendi',
-      'Obispos',
-      'Antonio José de Sucre',
-    ];
+    // Pick best text columns for especie & municipio if custom column names are used
+    const textColumns = colIndexMap
+      .map((c) => ({ norm: c.norm, val: rawFields[c.name] }))
+      .filter((x) => x.val && isNaN(Number(x.val)));
 
     const especie =
       rawEspecie && String(rawEspecie).trim()
         ? String(rawEspecie).trim()
-        : defaultSpecies[index % defaultSpecies.length];
+        : textColumns[0]?.val || 'Sin Especificar';
 
     const municipio =
       rawMunicipio && String(rawMunicipio).trim()
         ? String(rawMunicipio).trim()
-        : defaultMunicipios[index % defaultMunicipios.length];
+        : textColumns[1]?.val || 'Barinas';
 
     const parroquia =
       rawParroquia && String(rawParroquia).trim()
         ? String(rawParroquia).trim()
-        : `Casco Central ${municipio}`;
+        : textColumns[2]?.val || '-';
 
     const tipoPesca =
       rawTipo && String(rawTipo).trim()
         ? String(rawTipo).trim()
-        : 'Feria / Jornada Social';
+        : 'Jornada Venezuela Come Pescado';
 
     const puntoDistribucion =
       rawPunto && String(rawPunto).trim()
         ? String(rawPunto).trim()
-        : `Punto Soberano ${municipio}`;
+        : parroquia !== '-'
+        ? parroquia
+        : municipio;
 
     const fecha = parseExcelDate(rawFecha);
 
+    // Format date values inside rawFields if they were Excel serial dates
+    colIndexMap.forEach((c) => {
+      if (c.norm.includes('fecha') || c.norm.includes('dia')) {
+        rawFields[c.name] = parseExcelDate(row[c.index]);
+      }
+    });
+
     records.push({
-      id: `xl-${timestampSeed}-${index}`,
+      id: `xl-${timestampSeed}-${r}`,
       fecha,
       especie,
       municipio,
@@ -513,111 +370,92 @@ export function parseExcelBuffer(
       familiasBeneficiadas: familias,
       puntoDistribucion,
       archivoOrigen: fileName,
+      rawFields,
     });
-  });
+  }
 
-  return records;
+  return { records, columns };
 }
 
 /**
- * Generates and downloads a realistic Barinas fishery Excel file (.xlsx)
- * so users can test cumulative uploads or use it as an official template.
+ * Generates and downloads a template Excel file (.xlsx)
  */
 export function downloadSampleExcelTemplate(batchNumber = 1) {
   const sampleRows = [
     {
-      Fecha: '2026-10-04',
-      Especie: 'Cachama Negra',
+      Fecha: '2026-11-01',
       Municipio: 'Barinas',
       Parroquia: 'El Carmen',
-      'Tipo de Pesca': 'Feria / Jornada Social',
-      Toneladas: 5.4,
-      'Familias Beneficiadas': 1350,
-      'Punto de Distribución': 'Feria Social El Carmen',
+      Especie: 'Cachama Negra',
+      'Modalidad / Operativo': 'Feria Venezuela Come Pescado',
+      'Punto de Distribución': 'Plaza Bolívar',
+      'Kilogramos (Kg)': 4500,
+      'Toneladas (TM)': 4.5,
+      'Familias Beneficiadas': 1125,
     },
     {
-      Fecha: '2026-10-08',
-      Especie: 'Coporo',
+      Fecha: '2026-11-03',
       Municipio: 'Pedraza',
       Parroquia: 'Ciudad Bolivia',
-      'Tipo de Pesca': 'Acuicultura Continental',
-      Toneladas: 6.15,
-      'Familias Beneficiadas': 1540,
+      Especie: 'Coporo',
+      'Modalidad / Operativo': 'Acuicultura Continental',
       'Punto de Distribución': 'Eje Piscícola Pedraza',
+      'Kilogramos (Kg)': 6200,
+      'Toneladas (TM)': 6.2,
+      'Familias Beneficiadas': 1550,
     },
     {
-      Fecha: '2026-10-12',
-      Especie: 'Bagre Rayado',
+      Fecha: '2026-11-05',
       Municipio: 'Sosa',
       Parroquia: 'Puerto de Nutrias',
-      'Tipo de Pesca': 'Pesca Artesanal Fluvial',
-      Toneladas: 4.25,
-      'Familias Beneficiadas': 1060,
-      'Punto de Distribución': 'Ribera Río Apure - Nutrias',
-    },
-    {
-      Fecha: '2026-10-15',
-      Especie: 'Pavón Cinchado',
-      Municipio: 'Rojas',
-      Parroquia: 'Libertad',
-      'Tipo de Pesca': 'Pesca Artesanal Fluvial',
-      Toneladas: 3.1,
-      'Familias Beneficiadas': 775,
-      'Punto de Distribución': 'Corredor Libertad de Barinas',
-    },
-    {
-      Fecha: '2026-10-19',
-      Especie: 'Morocoto',
-      Municipio: 'Alberto Arvelo Torrealba',
-      Parroquia: 'Sabaneta',
-      'Tipo de Pesca': 'Acuicultura Continental',
-      Toneladas: 4.8,
-      'Familias Beneficiadas': 1200,
-      'Punto de Distribución': 'Centro Acuícola Sabaneta',
-    },
-    {
-      Fecha: '2026-10-23',
-      Especie: 'Palometa Llanera',
-      Municipio: 'Obispos',
-      Parroquia: 'Obispos',
-      'Tipo de Pesca': 'Centro de Acopio',
-      Toneladas: 3.65,
-      'Familias Beneficiadas': 915,
-      'Punto de Distribución': 'Acopio Comunal Obispos',
+      Especie: 'Bagre Rayado',
+      'Modalidad / Operativo': 'Pesca Artesanal Fluvial',
+      'Punto de Distribución': 'Ribera Río Apure',
+      'Kilogramos (Kg)': 3800,
+      'Toneladas (TM)': 3.8,
+      'Familias Beneficiadas': 950,
     },
   ];
 
   const worksheet = XLSX.utils.json_to_sheet(sampleRows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Reporte_Barinas');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Formato_Pesca_Barinas');
   XLSX.writeFile(
     workbook,
-    `Reporte_Pesca_Barinas_Lote_${batchNumber}.xlsx`
+    `Formato_Venezuela_Come_Pescado_Barinas_${batchNumber}.xlsx`
   );
 }
 
 /**
- * Exports current filtered records to an Excel file
+ * Exports current filtered records to an Excel file preserving custom Excel columns
  */
 export function exportRecordsToExcel(records: FisheryRecord[]) {
-  const rows = records.map((r) => ({
-    Fecha: r.fecha,
-    Especie: r.especie,
-    Municipio: r.municipio,
-    Parroquia: r.parroquia,
-    'Tipo de Pesca': r.tipoPesca,
-    'Toneladas (TM)': r.toneladas,
-    'Kilogramos (Kg)': Math.round(r.toneladas * 1000),
-    'Familias Beneficiadas': r.familiasBeneficiadas,
-    'Punto de Distribución': r.puntoDistribucion,
-    'Archivo de Origen': r.archivoOrigen,
-  }));
+  const rows = records.map((r) => {
+    if (r.rawFields && Object.keys(r.rawFields).length > 0) {
+      return {
+        ...r.rawFields,
+        'Archivo Origen': r.archivoOrigen,
+      };
+    }
+    return {
+      Fecha: r.fecha,
+      Especie: r.especie,
+      Municipio: r.municipio,
+      Parroquia: r.parroquia,
+      Modalidad: r.tipoPesca,
+      'Toneladas (TM)': r.toneladas,
+      'Kilogramos (Kg)': Math.round(r.toneladas * 1000),
+      'Familias Beneficiadas': r.familiasBeneficiadas,
+      'Punto de Distribución': r.puntoDistribucion,
+      'Archivo de Origen': r.archivoOrigen,
+    };
+  });
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Consolidado_Barinas');
   XLSX.writeFile(
     workbook,
-    `Observatorio_Pesca_Barinas_Consolidado_${new Date().toISOString().slice(0, 10)}.xlsx`
+    `Consolidado_Venezuela_Come_Pescado_Barinas_${new Date().toISOString().slice(0, 10)}.xlsx`
   );
 }

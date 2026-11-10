@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FilterState, FisheryRecord, UploadedFileMeta } from './types/fishery';
-import { DEMO_RECORDS, parseExcelBuffer } from './data/demoData';
+import { parseExcelBuffer } from './data/demoData';
 import { HeroLanding } from './components/HeroLanding';
 import { DashboardView } from './components/DashboardView';
 import { StickyFooter } from './components/StickyFooter';
 
-const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v1';
-const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v1';
-const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v1';
+const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v2';
+const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v2';
+const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v2';
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -17,12 +17,13 @@ const INITIAL_FILTERS: FilterState = {
   fechaInicio: '',
   fechaFin: '',
   archivoOrigen: 'Todos',
+  customFields: {},
 };
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'hero' | 'dashboard'>('hero');
 
-  // Persisted cumulative uploaded records
+  // Starts at 0 (empty array) until the user attaches an Excel file
   const [uploadedRecords, setUploadedRecords] = useState<FisheryRecord[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_RECORDS_KEY);
@@ -61,7 +62,7 @@ export default function App() {
     } catch {
       // Ignore storage errors
     }
-    return 120;
+    return 100;
   });
 
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
@@ -88,13 +89,6 @@ export default function App() {
       // Ignore storage errors
     }
   }, [regionalGoalTons]);
-
-  // If no Excel files or custom records have been saved yet, show realistic Barinas demo data
-  const isUsingDemoData =
-    uploadedFiles.length === 0 && uploadedRecords.length === 0;
-  const activeRecords = useMemo(() => {
-    return isUsingDemoData ? DEMO_RECORDS : uploadedRecords;
-  }, [isUsingDemoData, uploadedRecords]);
 
   // Cumulative Excel File Upload Handler
   const handleUploadFiles = async (fileList: FileList) => {
@@ -124,7 +118,10 @@ export default function App() {
               }`
             : file.name;
 
-        const parsedRecords = parseExcelBuffer(buffer, effectiveFileName);
+        const { records: parsedRecords, columns } = parseExcelBuffer(
+          buffer,
+          effectiveFileName
+        );
 
         if (parsedRecords.length > 0) {
           const fileToneladas = parsedRecords.reduce(
@@ -144,6 +141,7 @@ export default function App() {
             recordCount: parsedRecords.length,
             totalToneladas: +fileToneladas.toFixed(2),
             sizeKB: Math.max(1, Math.round(file.size / 1024)),
+            columns,
           });
         }
       }
@@ -163,9 +161,7 @@ export default function App() {
           type: 'success',
           message: `Se acumularon +${newRecordsBatch.length} registros (+${addedTons.toFixed(
             2
-          )} TM) de ${newFilesBatch.length} ${
-            newFilesBatch.length === 1 ? 'archivo' : 'archivos'
-          }.`,
+          )} TM) y se crearon los filtros para los campos del Excel.`,
         });
       }
     } catch {
@@ -184,13 +180,28 @@ export default function App() {
     data: Omit<FisheryRecord, 'id' | 'archivoOrigen'>,
     existingId?: string
   ) => {
-    const basePool = isUsingDemoData ? [...DEMO_RECORDS] : [...uploadedRecords];
-
     if (existingId) {
-      const updated = basePool.map((rec) =>
-        rec.id === existingId ? { ...rec, ...data } : rec
+      setUploadedRecords((prev) =>
+        prev.map((rec) =>
+          rec.id === existingId
+            ? {
+                ...rec,
+                ...data,
+                rawFields: {
+                  ...(rec.rawFields || {}),
+                  Fecha: data.fecha,
+                  Especie: data.especie,
+                  Municipio: data.municipio,
+                  Parroquia: data.parroquia,
+                  Modalidad: data.tipoPesca,
+                  'Toneladas (TM)': String(data.toneladas),
+                  'Familias Beneficiadas': String(data.familiasBeneficiadas),
+                  'Punto de Distribución': data.puntoDistribucion,
+                },
+              }
+            : rec
+        )
       );
-      setUploadedRecords(updated);
       setUploadFeedback({
         type: 'success',
         message: `Registro actualizado (${data.especie} · ${data.municipio}).`,
@@ -200,8 +211,19 @@ export default function App() {
         ...data,
         id: `manual-${Date.now()}`,
         archivoOrigen: 'Registro Manual',
+        rawFields: {
+          Fecha: data.fecha,
+          Municipio: data.municipio,
+          Parroquia: data.parroquia,
+          Especie: data.especie,
+          Modalidad: data.tipoPesca,
+          'Punto de Distribución': data.puntoDistribucion,
+          'Kilogramos (Kg)': String(Math.round(data.toneladas * 1000)),
+          'Toneladas (TM)': String(data.toneladas),
+          'Familias Beneficiadas': String(data.familiasBeneficiadas),
+        },
       };
-      setUploadedRecords([newRec, ...basePool]);
+      setUploadedRecords((prev) => [newRec, ...prev]);
       setUploadFeedback({
         type: 'success',
         message: `Jornada registrada manualmente (+${data.toneladas.toFixed(
@@ -213,9 +235,7 @@ export default function App() {
 
   // Delete an individual record row
   const handleDeleteRecord = (id: string) => {
-    const basePool = isUsingDemoData ? [...DEMO_RECORDS] : [...uploadedRecords];
-    const nextPool = basePool.filter((r) => r.id !== id);
-    setUploadedRecords(nextPool);
+    setUploadedRecords((prev) => prev.filter((r) => r.id !== id));
     setUploadFeedback({
       type: 'success',
       message: 'Fila eliminada del registro consolidado.',
@@ -237,7 +257,7 @@ export default function App() {
     });
   };
 
-  // Clear all uploaded files history and return to demo dataset
+  // Clear all uploaded files history and return to 0
   const handleClearAllHistory = () => {
     setUploadedFiles([]);
     setUploadedRecords([]);
@@ -246,8 +266,7 @@ export default function App() {
     localStorage.removeItem(STORAGE_FILES_KEY);
     setUploadFeedback({
       type: 'success',
-      message:
-        'Historial de archivos limpiado. Mostrando datos de demostración de Barinas.',
+      message: 'Historial limpiado. Todos los indicadores están en cero (0).',
     });
   };
 
@@ -274,9 +293,8 @@ export default function App() {
             setCurrentView('hero');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          records={activeRecords}
+          records={uploadedRecords}
           uploadedFiles={uploadedFiles}
-          isUsingDemoData={isUsingDemoData}
           onUploadFiles={handleUploadFiles}
           onRemoveSingleFile={handleRemoveSingleFile}
           onClearAllHistory={handleClearAllHistory}

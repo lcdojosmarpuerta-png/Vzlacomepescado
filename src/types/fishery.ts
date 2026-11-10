@@ -9,6 +9,8 @@ export interface FisheryRecord {
   familiasBeneficiadas: number;
   puntoDistribucion: string;
   archivoOrigen: string;
+  /** Exact key-value pairs of all columns from the uploaded Excel row */
+  rawFields?: Record<string, string>;
 }
 
 export interface UploadedFileMeta {
@@ -18,6 +20,7 @@ export interface UploadedFileMeta {
   recordCount: number;
   totalToneladas: number;
   sizeKB: number;
+  columns: string[];
 }
 
 export interface FilterState {
@@ -28,4 +31,6 @@ export interface FilterState {
   fechaInicio: string;
   fechaFin: string;
   archivoOrigen: string;
+  /** Dynamic filters keyed by exact Excel column header name */
+  customFields: Record<string, string>;
 }
