@@ -31,12 +31,16 @@ import { DashboardBanner } from './DashboardBanner';
 import { ControlSidebar, FilterOptionCount } from './ControlSidebar';
 import { BarinasMap } from './BarinasMap';
 import { TerritorialJornadasChart } from './TerritorialJornadasChart';
+import { JornadasStackedBarChart } from './JornadasStackedBarChart';
 import { SpeciesDynamicIndicator } from './SpeciesDynamicIndicator';
 import { RecordModal } from './RecordModal';
 import { ExecutiveReportModal } from './ExecutiveReportModal';
 import {
+  cleanCellText,
   downloadSampleExcelTemplate,
   exportRecordsToExcel,
+  isBlankIndicatorValue,
+  isValidFisheryRecord,
   normalizeMunicipioBarinas,
   normalizeSearchText,
 } from '../data/demoData';
@@ -129,26 +133,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const quickFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Strictly ignore completely blank/whitespace-only records
+  const validRecords = useMemo(
+    () => records.filter(isValidFisheryRecord),
+    [records]
+  );
+
   // Extract all exact column names from uploaded Excel files
   const allExcelColumnNames = useMemo(() => {
     const colSet = new Set<string>();
     uploadedFiles.forEach((f) => {
       f.columns?.forEach((c) => colSet.add(c));
     });
-    records.forEach((r) => {
+    validRecords.forEach((r) => {
       if (r.rawFields) {
         Object.keys(r.rawFields).forEach((k) => colSet.add(k));
       }
     });
     return Array.from(colSet);
-  }, [uploadedFiles, records]);
+  }, [uploadedFiles, validRecords]);
 
-  // Cascading filter options with counts
+  // Cascading filter options with counts (strictly excluding blank/whitespace values)
   const availableMunicipios: FilterOptionCount[] = useMemo(() => {
     const counts = new Map<string, number>();
-    records.forEach((r) => {
-      const mun = r.municipio.trim();
-      if (mun && mun !== 'No especificado' && mun !== 'Sin Especificar') {
+    validRecords.forEach((r) => {
+      const mun = cleanCellText(r.municipio);
+      if (!isBlankIndicatorValue(mun)) {
         const norm = normalizeMunicipioBarinas(mun);
         counts.set(norm, (counts.get(norm) || 0) + 1);
       }
@@ -156,21 +166,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(counts.entries())
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => a.value.localeCompare(b.value));
-  }, [records]);
+  }, [validRecords]);
 
   const recordsScopedByMun = useMemo(() => {
-    if (filters.municipio === 'Todos') return records;
+    if (filters.municipio === 'Todos') return validRecords;
     const targetMun = normalizeMunicipioBarinas(filters.municipio);
-    return records.filter(
-      (r) => normalizeMunicipioBarinas(r.municipio) === targetMun
+    return validRecords.filter(
+      (r) => normalizeMunicipioBarinas(cleanCellText(r.municipio)) === targetMun
     );
-  }, [records, filters.municipio]);
+  }, [validRecords, filters.municipio]);
 
   const availableParroquias: FilterOptionCount[] = useMemo(() => {
     const counts = new Map<string, number>();
     recordsScopedByMun.forEach((r) => {
-      const par = r.parroquia?.trim();
-      if (par && par !== '-') {
+      const par = cleanCellText(r.parroquia);
+      if (!isBlankIndicatorValue(par)) {
         counts.set(par, (counts.get(par) || 0) + 1);
       }
     });
@@ -182,15 +192,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const recordsScopedByPar = useMemo(() => {
     if (filters.parroquia === 'Todas') return recordsScopedByMun;
     return recordsScopedByMun.filter(
-      (r) => (r.parroquia?.trim() || '-') === filters.parroquia
+      (r) => cleanCellText(r.parroquia) === filters.parroquia
     );
   }, [recordsScopedByMun, filters.parroquia]);
 
   const availableComunas: FilterOptionCount[] = useMemo(() => {
     const counts = new Map<string, number>();
     recordsScopedByPar.forEach((r) => {
-      const com = getComunaText(r);
-      if (com && com !== '-') {
+      const com = cleanCellText(getComunaText(r));
+      if (!isBlankIndicatorValue(com)) {
         counts.set(com, (counts.get(com) || 0) + 1);
       }
     });
@@ -202,8 +212,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const availableSpecies: FilterOptionCount[] = useMemo(() => {
     const counts = new Map<string, number>();
     recordsScopedByPar.forEach((r) => {
-      const esp = r.especie.trim();
-      if (esp) {
+      const esp = cleanCellText(r.especie);
+      if (!isBlankIndicatorValue(esp)) {
         counts.set(esp, (counts.get(esp) || 0) + 1);
       }
     });
@@ -213,16 +223,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [recordsScopedByPar]);
 
   const availableTiposPesca = useMemo(() => {
-    return Array.from(new Set(records.map((r) => r.tipoPesca))).sort();
-  }, [records]);
+    return Array.from(
+      new Set(
+        validRecords
+          .map((r) => cleanCellText(r.tipoPesca))
+          .filter((t) => !isBlankIndicatorValue(t))
+      )
+    ).sort();
+  }, [validRecords]);
 
   const dynamicExcelColumns = useMemo(() => {
     return allExcelColumnNames
       .map((column) => {
         const valSet = new Set<string>();
-        records.forEach((r) => {
-          const val = r.rawFields?.[column];
-          if (val !== undefined && val !== '') {
+        validRecords.forEach((r) => {
+          const val = cleanCellText(r.rawFields?.[column]);
+          if (!isBlankIndicatorValue(val)) {
             valSet.add(val);
           }
         });
@@ -230,7 +246,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return { column, options };
       })
       .filter((item) => item.options.length > 0 && item.options.length <= 200);
-  }, [allExcelColumnNames, records]);
+  }, [allExcelColumnNames, validRecords]);
 
   // Apply dynamic filters + accent-insensitive multi-term search
   const filteredRecords = useMemo(() => {
@@ -249,13 +265,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .split(/\s+/)
       .filter(Boolean);
 
-    return records.filter((rec) => {
-      if (filters.especie !== 'Todas' && rec.especie !== filters.especie) {
+    return validRecords.filter((rec) => {
+      if (
+        filters.especie !== 'Todas' &&
+        cleanCellText(rec.especie) !== filters.especie
+      ) {
         return false;
       }
       if (
         selectedMunNorm !== 'Todos' &&
-        normalizeMunicipioBarinas(rec.municipio) !== selectedMunNorm
+        normalizeMunicipioBarinas(cleanCellText(rec.municipio)) !== selectedMunNorm
       ) {
         return false;
       }
@@ -292,7 +311,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         filters.customFields
       )) {
         if (selectedVal && selectedVal !== 'Todos') {
-          const recordVal = rec.rawFields?.[colName] ?? '';
+          const recordVal = cleanCellText(rec.rawFields?.[colName]);
           if (recordVal !== selectedVal) {
             return false;
           }
@@ -342,14 +361,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       return true;
     });
-  }, [records, filters]);
+  }, [validRecords, filters]);
 
   const hasDateData = useMemo(
-    () => records.some((r) => Boolean(r.fecha && r.fecha.trim())),
-    [records]
+    () => validRecords.some((r) => Boolean(r.fecha && r.fecha.trim())),
+    [validRecords]
   );
 
-  // Compute exact KPI Metrics (0 when no Excel uploaded)
+  // Compute exact KPI Metrics (0 when no Excel uploaded, never summing blank entries)
   const kpiMetrics = useMemo(() => {
     const totalToneladas = filteredRecords.reduce(
       (acc, r) => acc + r.toneladas,
@@ -364,12 +383,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const validMunicipios = new Set<string>();
 
     filteredRecords.forEach((r) => {
-      const esp = r.especie.trim();
-      if (esp && esp !== 'Sin Especificar' && esp !== 'No especificado') {
+      const esp = cleanCellText(r.especie);
+      if (!isBlankIndicatorValue(esp)) {
         speciesTotals.set(esp, (speciesTotals.get(esp) || 0) + r.toneladas);
       }
-      const mun = r.municipio.trim();
-      if (mun && mun !== 'No especificado' && mun !== 'Sin Especificar') {
+      const mun = cleanCellText(r.municipio);
+      if (!isBlankIndicatorValue(mun)) {
         validMunicipios.add(normalizeMunicipioBarinas(mun));
       }
     });
@@ -567,7 +586,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <DashboardBanner />
 
         {/* Zero-Data State Notice: Ready to attach Excel file */}
-        {records.length === 0 && (
+        {validRecords.length === 0 && (
           <div
             role="status"
             className="mb-6 rounded-xl bg-cyan-950 text-white px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm"
@@ -670,13 +689,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {/* Live match counter */}
                 <div className="flex items-center justify-between md:justify-end gap-2 shrink-0">
                   <span className="text-xs font-mono tabular-nums text-slate-600 bg-slate-100 px-3 py-2 rounded-lg whitespace-nowrap">
-                    {filteredRecords.length} de {records.length} reg.
+                    {filteredRecords.length} de {validRecords.length} reg.
                   </span>
                 </div>
               </div>
 
               {/* Quick Cascading Filters Row */}
-              {records.length > 0 && (
+              {validRecords.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 pt-1">
                   <select
                     aria-label="Filtro rápido por Municipio"
@@ -998,7 +1017,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               }}
             />
 
-            {/* 3. Gráfico Dinámico de Jornadas por Municipio, Parroquia y Comuna */}
+            {/* 3. Gráfico de Barras Apiladas Dinámico: Jornadas por Municipio, Parroquia y Comuna */}
+            <JornadasStackedBarChart
+              records={filteredRecords}
+              filters={filters}
+              onSelectMunicipio={(municipio) => {
+                onUpdateFilters({
+                  municipio,
+                  parroquia: 'Todas',
+                  comuna: 'Todas',
+                });
+                setCurrentPage(1);
+              }}
+              onSelectParroquia={(parroquia) => {
+                onUpdateFilters({ parroquia, comuna: 'Todas' });
+                setCurrentPage(1);
+              }}
+              onSelectComuna={(comuna) => {
+                onUpdateFilters({ comuna });
+                setCurrentPage(1);
+              }}
+              onQuickUpload={() => quickFileInputRef.current?.click()}
+            />
+
+            {/* 4. Gráfico Dinámico de Jornadas por Nivel Territorial */}
             <TerritorialJornadasChart
               records={filteredRecords}
               selectedMunicipio={filters.municipio}
@@ -1056,7 +1098,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </span>{' '}
                     de{' '}
                     <span className="font-mono tabular-nums font-semibold text-slate-800">
-                      {records.length}
+                      {validRecords.length}
                     </span>{' '}
                     registros cargados
                   </p>

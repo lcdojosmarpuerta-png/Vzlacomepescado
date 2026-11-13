@@ -11,7 +11,12 @@ import {
 } from 'recharts';
 import { MapPinned, FileSpreadsheet, Upload, RotateCcw } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
-import { normalizeMunicipioBarinas } from '../data/demoData';
+import {
+  cleanCellText,
+  isBlankIndicatorValue,
+  isValidFisheryRecord,
+  normalizeMunicipioBarinas,
+} from '../data/demoData';
 
 export type TerritorialLevel = 'municipio' | 'parroquia' | 'comuna';
 
@@ -36,21 +41,22 @@ const TERRITORIAL_COLORS = [
 ];
 
 function resolveComunaLabel(r: FisheryRecord): string {
-  if (r.comuna && r.comuna !== '-') return r.comuna.trim();
+  const direct = cleanCellText(r.comuna);
+  if (!isBlankIndicatorValue(direct)) return direct;
   if (r.rawFields) {
     for (const [key, val] of Object.entries(r.rawFields)) {
       const k = key.toLowerCase();
       if (
-        (k.includes('comuna') ||
-          k.includes('circuito') ||
-          k.includes('consejo') ||
-          k.includes('comunidad') ||
-          k.includes('sector')) &&
-        val &&
-        val.trim() !== '' &&
-        val.trim() !== '-'
+        k.includes('comuna') ||
+        k.includes('circuito') ||
+        k.includes('consejo') ||
+        k.includes('comunidad') ||
+        k.includes('sector')
       ) {
-        return val.trim();
+        const cleaned = cleanCellText(val);
+        if (!isBlankIndicatorValue(cleaned)) {
+          return cleaned;
+        }
       }
     }
   }
@@ -73,6 +79,7 @@ export const TerritorialJornadasChart: React.FC<
   const [showAll, setShowAll] = useState<boolean>(false);
 
   const chartStats = useMemo(() => {
+    const validRecords = records.filter(isValidFisheryRecord);
     const map = new Map<
       string,
       {
@@ -85,21 +92,24 @@ export const TerritorialJornadasChart: React.FC<
       }
     >();
 
-    records.forEach((r) => {
+    let countedJornadas = 0;
+
+    validRecords.forEach((r) => {
       let label = '';
       if (level === 'municipio') {
-        const mun = r.municipio.trim();
-        label =
-          mun && mun !== 'No especificado' && mun !== 'Sin Especificar'
-            ? normalizeMunicipioBarinas(mun)
-            : 'Sin Municipio';
+        const mun = cleanCellText(r.municipio);
+        label = !isBlankIndicatorValue(mun) ? normalizeMunicipioBarinas(mun) : '';
       } else if (level === 'parroquia') {
-        const par = r.parroquia?.trim();
-        label = par && par !== '-' ? par : 'Sin Parroquia';
+        const par = cleanCellText(r.parroquia);
+        label = !isBlankIndicatorValue(par) ? par : '';
       } else {
-        const com = resolveComunaLabel(r);
-        label = com || 'Sin Comuna';
+        label = resolveComunaLabel(r);
       }
+
+      // Strictly skip blank / whitespace / placeholder entries from territorial counts
+      if (!label) return;
+
+      countedJornadas += 1;
 
       const current = map.get(label) || {
         name: label,
@@ -114,8 +124,9 @@ export const TerritorialJornadasChart: React.FC<
       current.kilogramos += r.kilogramos ?? r.toneladas * 1000;
       current.toneladas += r.toneladas;
       current.familias += r.familiasBeneficiadas;
-      if (r.municipio && r.municipio !== 'No especificado') {
-        current.municipios.add(normalizeMunicipioBarinas(r.municipio));
+      const munClean = cleanCellText(r.municipio);
+      if (!isBlankIndicatorValue(munClean)) {
+        current.municipios.add(normalizeMunicipioBarinas(munClean));
       }
 
       map.set(label, current);
@@ -132,20 +143,12 @@ export const TerritorialJornadasChart: React.FC<
       }))
       .sort((a, b) => b.jornadas - a.jornadas || b.kilogramos - a.kilogramos);
 
-    const namedRows = allRows.filter(
-      (r) =>
-        r.name !== 'Sin Municipio' &&
-        r.name !== 'Sin Parroquia' &&
-        r.name !== 'Sin Comuna'
-    );
-
-    const effectiveRows = namedRows.length > 0 ? allRows : [];
-    const displayedRows = showAll ? effectiveRows : effectiveRows.slice(0, 15);
+    const displayedRows = showAll ? allRows : allRows.slice(0, 15);
 
     return {
-      totalTerritories: namedRows.length,
-      totalJornadas: records.length,
-      allRows: effectiveRows,
+      totalTerritories: allRows.length,
+      totalJornadas: countedJornadas,
+      allRows,
       displayedRows,
     };
   }, [records, level, showAll]);

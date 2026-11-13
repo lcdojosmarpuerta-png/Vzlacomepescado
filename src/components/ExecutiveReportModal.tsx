@@ -2,7 +2,13 @@ import React from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
 import { OfficialLogo } from './OfficialLogo';
-import { exportRecordsToExcel, normalizeMunicipioBarinas } from '../data/demoData';
+import {
+  cleanCellText,
+  exportRecordsToExcel,
+  isBlankIndicatorValue,
+  isValidFisheryRecord,
+  normalizeMunicipioBarinas,
+} from '../data/demoData';
 
 interface ExecutiveReportModalProps {
   isOpen: boolean;
@@ -19,12 +25,13 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const totalToneladas = records.reduce((acc, r) => acc + r.toneladas, 0);
-  const totalKilogramos = records.reduce(
+  const validRecords = records.filter(isValidFisheryRecord);
+  const totalToneladas = validRecords.reduce((acc, r) => acc + r.toneladas, 0);
+  const totalKilogramos = validRecords.reduce(
     (acc, r) => acc + (r.kilogramos ?? r.toneladas * 1000),
     0
   );
-  const totalFamilias = records.reduce(
+  const totalFamilias = validRecords.reduce(
     (acc, r) => acc + r.familiasBeneficiadas,
     0
   );
@@ -35,13 +42,12 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
       ? Math.min(100, +((totalToneladas / regionalGoalTons) * 100).toFixed(1))
       : 0;
 
-  // Group by Municipality
+  // Group by Municipality (strictly excluding blank entries)
   const byMunicipio = Array.from(
-    records.reduce((map, r) => {
-      const munName =
-        r.municipio === 'No especificado'
-          ? 'No especificado'
-          : normalizeMunicipioBarinas(r.municipio);
+    validRecords.reduce((map, r) => {
+      const munClean = cleanCellText(r.municipio);
+      if (isBlankIndicatorValue(munClean)) return map;
+      const munName = normalizeMunicipioBarinas(munClean);
       const cur = map.get(munName) || {
         toneladas: 0,
         familias: 0,
@@ -55,13 +61,15 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
     }, new Map<string, { toneladas: number; familias: number; jornadas: number }>())
   ).sort((a, b) => b[1].toneladas - a[1].toneladas);
 
-  // Group by Species
+  // Group by Species (strictly excluding blank entries)
   const bySpecies = Array.from(
-    records.reduce((map, r) => {
-      const cur = map.get(r.especie) || { toneladas: 0, jornadas: 0 };
+    validRecords.reduce((map, r) => {
+      const espClean = cleanCellText(r.especie);
+      if (isBlankIndicatorValue(espClean)) return map;
+      const cur = map.get(espClean) || { toneladas: 0, jornadas: 0 };
       cur.toneladas += r.toneladas;
       cur.jornadas += 1;
-      map.set(r.especie, cur);
+      map.set(espClean, cur);
       return map;
     }, new Map<string, { toneladas: number; jornadas: number }>())
   ).sort((a, b) => b[1].toneladas - a[1].toneladas);
@@ -134,7 +142,7 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
                 Fecha de Emisión: <strong>{new Date().toISOString().slice(0, 10)}</strong>
               </div>
               <div>
-                Registros Analizados: <strong>{records.length} jornadas</strong>
+                Registros Analizados: <strong>{validRecords.length} jornadas</strong>
               </div>
               <div>
                 Cumplimiento de Meta: <strong>{goalPct}% de {regionalGoalTons} TM</strong>

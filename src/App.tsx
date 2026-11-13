@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FilterState, FisheryRecord, UploadedFileMeta } from './types/fishery';
-import { parseExcelBuffer } from './data/demoData';
+import { parseExcelBuffer, isValidFisheryRecord } from './data/demoData';
 import { HeroLanding } from './components/HeroLanding';
 import { DashboardView } from './components/DashboardView';
 import { StickyFooter } from './components/StickyFooter';
@@ -32,7 +32,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_RECORDS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return parsed.filter(isValidFisheryRecord);
       }
     } catch {
       // Ignore storage errors

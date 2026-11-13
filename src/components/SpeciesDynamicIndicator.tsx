@@ -1,7 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Fish, Search, RotateCcw, ArrowUpDown } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
-import { normalizeMunicipioBarinas, normalizeSearchText } from '../data/demoData';
+import {
+  cleanCellText,
+  isBlankIndicatorValue,
+  isValidFisheryRecord,
+  normalizeMunicipioBarinas,
+  normalizeSearchText,
+} from '../data/demoData';
 
 interface SpeciesDynamicIndicatorProps {
   records: FisheryRecord[];
@@ -32,8 +38,10 @@ export const SpeciesDynamicIndicator: React.FC<
 
     let totalKgAll = 0;
 
-    records.forEach((r) => {
-      const esp = r.especie.trim() || 'Sin Especificar';
+    records.filter(isValidFisheryRecord).forEach((r) => {
+      const esp = cleanCellText(r.especie);
+      if (isBlankIndicatorValue(esp)) return;
+
       const kg = r.kilogramos ?? r.toneladas * 1000;
       totalKgAll += kg;
 
@@ -50,8 +58,9 @@ export const SpeciesDynamicIndicator: React.FC<
       cur.toneladas += r.toneladas;
       cur.jornadas += 1;
       cur.familias += r.familiasBeneficiadas;
-      if (r.municipio && r.municipio !== 'No especificado') {
-        cur.municipios.add(normalizeMunicipioBarinas(r.municipio));
+      const munClean = cleanCellText(r.municipio);
+      if (!isBlankIndicatorValue(munClean)) {
+        cur.municipios.add(normalizeMunicipioBarinas(munClean));
       }
 
       map.set(esp, cur);
@@ -73,14 +82,10 @@ export const SpeciesDynamicIndicator: React.FC<
       return b.kilogramos - a.kilogramos || b.jornadas - a.jornadas;
     });
 
-    const namedCount = list.filter(
-      (s) => s.especie !== 'Sin Especificar' && s.especie !== 'No especificado'
-    ).length;
-
     return {
       list,
       totalKgAll,
-      namedCount,
+      namedCount: list.length,
       topSpecies: list[0] || null,
     };
   }, [records, sortBy]);

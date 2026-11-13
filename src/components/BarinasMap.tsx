@@ -1,7 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { MapPin, RotateCcw } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
-import { normalizeMunicipioBarinas } from '../data/demoData';
+import {
+  cleanCellText,
+  isBlankIndicatorValue,
+  isValidFisheryRecord,
+  normalizeMunicipioBarinas,
+} from '../data/demoData';
 
 interface BarinasMapProps {
   records: FisheryRecord[];
@@ -137,8 +142,10 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
       map.set(m.name, { toneladas: 0, kilogramos: 0, familias: 0, jornadas: 0 });
     });
 
-    records.forEach((r) => {
-      const canonical = normalizeMunicipioBarinas(r.municipio);
+    records.filter(isValidFisheryRecord).forEach((r) => {
+      const munClean = cleanCellText(r.municipio);
+      if (isBlankIndicatorValue(munClean)) return;
+      const canonical = normalizeMunicipioBarinas(munClean);
       const prev = map.get(canonical) || {
         toneladas: 0,
         kilogramos: 0,

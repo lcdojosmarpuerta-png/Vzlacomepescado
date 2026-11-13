@@ -24,6 +24,65 @@ export function normalizeSearchText(text: string): string {
 }
 
 /**
+ * Strips regular and invisible Excel whitespace characters (\u00A0, \u200B, \uFEFF)
+ */
+export function cleanCellText(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const BLANK_PLACEHOLDER_VALUES = new Set([
+  '',
+  '-',
+  '--',
+  '—',
+  'n/a',
+  'na',
+  's/n',
+  'sin especificar',
+  'no especificado',
+  'sin dato',
+  'sin datos',
+  'sin informacion',
+  'sin información',
+  'null',
+  'undefined',
+]);
+
+/**
+ * Returns true if a value is empty, whitespace-only, or a placeholder string
+ */
+export function isBlankIndicatorValue(val: string | undefined | null): boolean {
+  if (!val) return true;
+  const cleaned = cleanCellText(val).toLowerCase();
+  return BLANK_PLACEHOLDER_VALUES.has(cleaned);
+}
+
+/**
+ * Verifies a record contains at least one non-blank meaningful field or positive numeric metric
+ */
+export function isValidFisheryRecord(rec: FisheryRecord): boolean {
+  if (!rec) return false;
+  if (
+    rec.toneladas > 0 ||
+    (rec.kilogramos ?? 0) > 0 ||
+    rec.familiasBeneficiadas > 0
+  ) {
+    return true;
+  }
+  return (
+    !isBlankIndicatorValue(rec.especie) ||
+    !isBlankIndicatorValue(rec.municipio) ||
+    !isBlankIndicatorValue(rec.parroquia) ||
+    !isBlankIndicatorValue(rec.comuna) ||
+    !isBlankIndicatorValue(rec.puntoDistribucion)
+  );
+}
+
+/**
  * Tokenizes a header into clean lowercase alphanumeric words (no accents)
  */
 function tokenizeHeader(key: string): string[] {
@@ -531,22 +590,38 @@ export function parseExcelBuffer(
     'promedio',
   ]);
 
+  const indexOnlyColTokens = new Set([
+    'nro',
+    'no',
+    'num',
+    'numero',
+    'item',
+    'id',
+    'correlativo',
+    'indice',
+  ]);
+  const nonIndexCols = colIndexMap.filter(
+    (c) =>
+      c.name !== '#' &&
+      !(c.tokens.length > 0 && c.tokens.every((t) => indexOnlyColTokens.has(t)))
+  );
+  const meaningfulColsToCheck = nonIndexCols.length > 0 ? nonIndexCols : colIndexMap;
+
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {
     const row = matrix[r];
     if (!row) continue;
 
-    // Skip empty rows
-    const nonEmptyCount = colIndexMap.filter(
-      (c) => row[c.index] !== null && row[c.index] !== undefined && String(row[c.index]).trim() !== ''
-    ).length;
-    if (nonEmptyCount === 0) continue;
+    // Skip rows where all meaningful (non-index) columns are empty or whitespace-only
+    const meaningfulNonEmptyCount = meaningfulColsToCheck.filter((c) => {
+      const cleaned = cleanCellText(row[c.index]);
+      return cleaned !== '' && cleaned !== '-';
+    }).length;
+    if (meaningfulNonEmptyCount === 0) continue;
 
     // Skip summary/total rows (check first 4 columns so merged/indented TOTAL rows are caught)
     let isSummaryRow = false;
     for (let checkIdx = 0; checkIdx < Math.min(4, colIndexMap.length); checkIdx++) {
-      const cellStr = String(row[colIndexMap[checkIdx].index] ?? '')
-        .trim()
-        .toLowerCase();
+      const cellStr = cleanCellText(row[colIndexMap[checkIdx].index]).toLowerCase();
       if (
         summaryRowKeywords.has(cellStr) ||
         cellStr.startsWith('total ') ||
@@ -563,8 +638,7 @@ export function parseExcelBuffer(
 
     colIndexMap.forEach((c) => {
       const cellVal = row[c.index];
-      let strVal =
-        cellVal !== null && cellVal !== undefined ? String(cellVal).trim() : '';
+      let strVal = cleanCellText(cellVal);
 
       // Format Excel serial dates ONLY for actual date columns
       if (colFecha && c.index === colFecha.index && strVal !== '') {
@@ -620,38 +694,39 @@ export function parseExcelBuffer(
 
     const fecha = colFecha ? parseExcelDate(row[colFecha.index]) : '';
 
-    const especie = colEspecie
-      ? String(rawFields[colEspecie.name] || '').trim() || 'Sin Especificar'
-      : 'Sin Especificar';
+    const rawEsp = colEspecie ? cleanCellText(rawFields[colEspecie.name]) : '';
+    const especie = !isBlankIndicatorValue(rawEsp) ? rawEsp : 'Sin Especificar';
 
     const rawMunStr = colMunicipio
-      ? String(rawFields[colMunicipio.name] || '').trim()
+      ? cleanCellText(rawFields[colMunicipio.name])
       : '';
-    const municipio = rawMunStr
+    const municipio = !isBlankIndicatorValue(rawMunStr)
       ? normalizeMunicipioBarinas(rawMunStr)
       : 'No especificado';
 
-    const parroquia = colParroquia
-      ? String(rawFields[colParroquia.name] || '').trim() || '-'
-      : '-';
+    const rawPar = colParroquia
+      ? cleanCellText(rawFields[colParroquia.name])
+      : '';
+    const parroquia = !isBlankIndicatorValue(rawPar) ? rawPar : '-';
 
-    const comuna = colComuna
-      ? String(rawFields[colComuna.name] || '').trim() || '-'
-      : '-';
+    const rawCom = colComuna ? cleanCellText(rawFields[colComuna.name]) : '';
+    const comuna = !isBlankIndicatorValue(rawCom) ? rawCom : '-';
 
-    const tipoPesca = colTipo
-      ? String(rawFields[colTipo.name] || '').trim() || 'No especificado'
+    const rawTipo = colTipo ? cleanCellText(rawFields[colTipo.name]) : '';
+    const tipoPesca = !isBlankIndicatorValue(rawTipo)
+      ? rawTipo
       : 'No especificado';
 
-    const puntoDistribucion = colPunto
-      ? String(rawFields[colPunto.name] || '').trim() || '-'
+    const rawPunto = colPunto ? cleanCellText(rawFields[colPunto.name]) : '';
+    const puntoDistribucion = !isBlankIndicatorValue(rawPunto)
+      ? rawPunto
       : comuna !== '-'
       ? comuna
       : parroquia !== '-'
       ? parroquia
       : '-';
 
-    records.push({
+    const candidateRecord: FisheryRecord = {
       id: `xl-${timestampSeed}-${r}`,
       fecha,
       especie,
@@ -666,7 +741,12 @@ export function parseExcelBuffer(
       archivoOrigen: fileName,
       rawFields,
       numericFields,
-    });
+    };
+
+    // Final guard: never push rows that carry only blank/whitespace placeholders
+    if (!isValidFisheryRecord(candidateRecord)) continue;
+
+    records.push(candidateRecord);
   }
 
   // Identify columns that are genuinely numeric (>= 60% numeric rows)
