@@ -11,8 +11,11 @@ const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v3';
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
+  searchColumn: 'Todos',
   especie: 'Todas',
   municipio: 'Todos',
+  parroquia: 'Todas',
+  comuna: 'Todas',
   tipoPesca: [],
   fechaInicio: '',
   fechaFin: '',
@@ -204,6 +207,7 @@ export default function App() {
                   Especie: data.especie,
                   Municipio: data.municipio,
                   Parroquia: data.parroquia,
+                  Comuna: data.comuna,
                   Modalidad: data.tipoPesca,
                   'Kilogramos (Kg)': String(kilogramos),
                   'Toneladas (TM)': String(data.toneladas),
@@ -228,6 +232,7 @@ export default function App() {
           Fecha: data.fecha,
           Municipio: data.municipio,
           Parroquia: data.parroquia,
+          Comuna: data.comuna,
           Especie: data.especie,
           Modalidad: data.tipoPesca,
           'Punto de Distribución': data.puntoDistribucion,

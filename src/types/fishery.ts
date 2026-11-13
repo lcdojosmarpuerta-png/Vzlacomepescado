@@ -4,6 +4,7 @@ export interface FisheryRecord {
   especie: string;
   municipio: string;
   parroquia: string;
+  comuna: string;
   tipoPesca: string;
   toneladas: number; // Exact metric tons (without premature rounding)
   kilogramos: number; // Exact kilograms (without premature rounding)
@@ -32,8 +33,11 @@ export interface UploadedFileMeta {
 
 export interface FilterState {
   search: string;
+  searchColumn: string;
   especie: string;
   municipio: string;
+  parroquia: string;
+  comuna: string;
   tipoPesca: string[];
   fechaInicio: string;
   fechaFin: string;

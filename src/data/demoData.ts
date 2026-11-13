@@ -13,6 +13,17 @@ export function normalizeKey(key: string): string {
 }
 
 /**
+ * Accent-insensitive lowercase normalizer for search and filter matching
+ */
+export function normalizeSearchText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+/**
  * Tokenizes a header into clean lowercase alphanumeric words (no accents)
  */
 function tokenizeHeader(key: string): string[] {
@@ -461,8 +472,24 @@ export function parseExcelBuffer(
 
   const colParroquia = findColumnIndex(
     colIndexMap,
-    ['parroquia', 'sector', 'comunidad', 'circuito', 'comuna'],
-    ['parroquia', 'sector', 'comunidad', 'circuito', 'comuna']
+    ['parroquia', 'parroquias'],
+    ['parroquia', 'parroquias'],
+    ['municipio', 'comuna', 'sector']
+  );
+
+  const colComuna = findColumnIndex(
+    colIndexMap,
+    [
+      'comuna',
+      'comunas',
+      'circuitocomunal',
+      'circuito',
+      'consejocomunal',
+      'comunidad',
+      'sector',
+    ],
+    ['comuna', 'comunas', 'comunal', 'circuito', 'consejo', 'comunidad', 'sector'],
+    ['municipio', 'parroquia']
   );
 
   const colTipo = findColumnIndex(
@@ -608,12 +635,18 @@ export function parseExcelBuffer(
       ? String(rawFields[colParroquia.name] || '').trim() || '-'
       : '-';
 
+    const comuna = colComuna
+      ? String(rawFields[colComuna.name] || '').trim() || '-'
+      : '-';
+
     const tipoPesca = colTipo
       ? String(rawFields[colTipo.name] || '').trim() || 'No especificado'
       : 'No especificado';
 
     const puntoDistribucion = colPunto
       ? String(rawFields[colPunto.name] || '').trim() || '-'
+      : comuna !== '-'
+      ? comuna
       : parroquia !== '-'
       ? parroquia
       : '-';
@@ -624,6 +657,7 @@ export function parseExcelBuffer(
       especie,
       municipio,
       parroquia,
+      comuna,
       tipoPesca,
       toneladas,
       kilogramos,
@@ -669,6 +703,7 @@ export function downloadSampleExcelTemplate(batchNumber = 1) {
       Fecha: '2026-11-01',
       Municipio: 'Barinas',
       Parroquia: 'El Carmen',
+      Comuna: 'Comuna Chávez Frías',
       Especie: 'Cachama Negra',
       'Modalidad / Operativo': 'Feria Venezuela Come Pescado',
       'Punto de Distribución': 'Plaza Bolívar',
@@ -680,6 +715,7 @@ export function downloadSampleExcelTemplate(batchNumber = 1) {
       Fecha: '2026-11-03',
       Municipio: 'Pedraza',
       Parroquia: 'Ciudad Bolivia',
+      Comuna: 'Comuna Ticoporo Productivo',
       Especie: 'Coporo',
       'Modalidad / Operativo': 'Acuicultura Continental',
       'Punto de Distribución': 'Eje Piscícola Pedraza',
@@ -691,6 +727,7 @@ export function downloadSampleExcelTemplate(batchNumber = 1) {
       Fecha: '2026-11-05',
       Municipio: 'Sosa',
       Parroquia: 'Puerto de Nutrias',
+      Comuna: 'Comuna Ribereña Apure',
       Especie: 'Bagre Rayado',
       'Modalidad / Operativo': 'Pesca Artesanal Fluvial',
       'Punto de Distribución': 'Ribera Río Apure',
@@ -725,6 +762,7 @@ export function exportRecordsToExcel(records: FisheryRecord[]) {
       Especie: r.especie,
       Municipio: r.municipio,
       Parroquia: r.parroquia,
+      Comuna: r.comuna || '-',
       Modalidad: r.tipoPesca,
       'Toneladas (TM)': +r.toneladas.toFixed(4),
       'Kilogramos (Kg)': +r.kilogramos.toFixed(2),

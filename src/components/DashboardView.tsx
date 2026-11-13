@@ -1,20 +1,5 @@
 import React, { useMemo, useState, useRef } from 'react';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from 'recharts';
-import {
   Search,
   SlidersHorizontal,
   Scale,
@@ -34,6 +19,8 @@ import {
   Users,
   Home,
   FileSpreadsheet,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import {
   FilterState,
@@ -41,14 +28,17 @@ import {
   UploadedFileMeta,
 } from '../types/fishery';
 import { DashboardBanner } from './DashboardBanner';
-import { ControlSidebar } from './ControlSidebar';
+import { ControlSidebar, FilterOptionCount } from './ControlSidebar';
 import { BarinasMap } from './BarinasMap';
+import { TerritorialJornadasChart } from './TerritorialJornadasChart';
+import { SpeciesDynamicIndicator } from './SpeciesDynamicIndicator';
 import { RecordModal } from './RecordModal';
 import { ExecutiveReportModal } from './ExecutiveReportModal';
 import {
   downloadSampleExcelTemplate,
   exportRecordsToExcel,
   normalizeMunicipioBarinas,
+  normalizeSearchText,
 } from '../data/demoData';
 
 interface DashboardViewProps {
@@ -72,17 +62,6 @@ interface DashboardViewProps {
   uploadFeedback: { type: 'success' | 'error'; message: string } | null;
 }
 
-const CHART_COLORS = [
-  '#0284c7', // sky-600
-  '#06b6d4', // cyan-500
-  '#0f172a', // slate-900
-  '#eab308', // yellow-500
-  '#f43f5e', // rose-500
-  '#0d9488', // teal-600
-  '#2563eb', // blue-600
-  '#ea580c', // orange-600
-];
-
 type SortField =
   | 'fecha'
   | 'especie'
@@ -90,6 +69,28 @@ type SortField =
   | 'tipoPesca'
   | 'toneladas'
   | 'familiasBeneficiadas';
+
+function getComunaText(rec: FisheryRecord): string {
+  if (rec.comuna && rec.comuna !== '-') return rec.comuna.trim();
+  if (rec.rawFields) {
+    for (const [key, val] of Object.entries(rec.rawFields)) {
+      const k = key.toLowerCase();
+      if (
+        (k.includes('comuna') ||
+          k.includes('circuito') ||
+          k.includes('consejo') ||
+          k.includes('comunidad') ||
+          k.includes('sector')) &&
+        val &&
+        val.trim() !== '' &&
+        val.trim() !== '-'
+      ) {
+        return val.trim();
+      }
+    }
+  }
+  return '-';
+}
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onBackToHero,
@@ -108,9 +109,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isUploading,
   uploadFeedback,
 }) => {
-  const [barChartMode, setBarChartMode] = useState<string>('especie');
-  const [donutMode, setDonutMode] = useState<string>('tipoPesca');
-  const [chartMetric, setChartMetric] = useState<string>('toneladas');
   const [sortField, setSortField] = useState<SortField>('fecha');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -131,20 +129,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const quickFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Extract unique filter options from loaded records
-  const availableSpecies = useMemo(() => {
-    return Array.from(new Set(records.map((r) => r.especie))).sort();
-  }, [records]);
-
-  const availableMunicipios = useMemo(() => {
-    return Array.from(new Set(records.map((r) => r.municipio))).sort();
-  }, [records]);
-
-  const availableTiposPesca = useMemo(() => {
-    return Array.from(new Set(records.map((r) => r.tipoPesca))).sort();
-  }, [records]);
-
-  // Extract all exact column names and unique values from uploaded Excel files
+  // Extract all exact column names from uploaded Excel files
   const allExcelColumnNames = useMemo(() => {
     const colSet = new Set<string>();
     uploadedFiles.forEach((f) => {
@@ -158,18 +143,78 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(colSet);
   }, [uploadedFiles, records]);
 
-  const allNumericColumns = useMemo(() => {
-    const numSet = new Set<string>();
-    uploadedFiles.forEach((f) => {
-      f.numericColumns?.forEach((c) => numSet.add(c));
-    });
+  // Cascading filter options with counts
+  const availableMunicipios: FilterOptionCount[] = useMemo(() => {
+    const counts = new Map<string, number>();
     records.forEach((r) => {
-      if (r.numericFields) {
-        Object.keys(r.numericFields).forEach((k) => numSet.add(k));
+      const mun = r.municipio.trim();
+      if (mun && mun !== 'No especificado' && mun !== 'Sin Especificar') {
+        const norm = normalizeMunicipioBarinas(mun);
+        counts.set(norm, (counts.get(norm) || 0) + 1);
       }
     });
-    return Array.from(numSet);
-  }, [uploadedFiles, records]);
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  }, [records]);
+
+  const recordsScopedByMun = useMemo(() => {
+    if (filters.municipio === 'Todos') return records;
+    const targetMun = normalizeMunicipioBarinas(filters.municipio);
+    return records.filter(
+      (r) => normalizeMunicipioBarinas(r.municipio) === targetMun
+    );
+  }, [records, filters.municipio]);
+
+  const availableParroquias: FilterOptionCount[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    recordsScopedByMun.forEach((r) => {
+      const par = r.parroquia?.trim();
+      if (par && par !== '-') {
+        counts.set(par, (counts.get(par) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  }, [recordsScopedByMun]);
+
+  const recordsScopedByPar = useMemo(() => {
+    if (filters.parroquia === 'Todas') return recordsScopedByMun;
+    return recordsScopedByMun.filter(
+      (r) => (r.parroquia?.trim() || '-') === filters.parroquia
+    );
+  }, [recordsScopedByMun, filters.parroquia]);
+
+  const availableComunas: FilterOptionCount[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    recordsScopedByPar.forEach((r) => {
+      const com = getComunaText(r);
+      if (com && com !== '-') {
+        counts.set(com, (counts.get(com) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  }, [recordsScopedByPar]);
+
+  const availableSpecies: FilterOptionCount[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    recordsScopedByPar.forEach((r) => {
+      const esp = r.especie.trim();
+      if (esp) {
+        counts.set(esp, (counts.get(esp) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  }, [recordsScopedByPar]);
+
+  const availableTiposPesca = useMemo(() => {
+    return Array.from(new Set(records.map((r) => r.tipoPesca))).sort();
+  }, [records]);
 
   const dynamicExcelColumns = useMemo(() => {
     return allExcelColumnNames
@@ -187,12 +232,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .filter((item) => item.options.length > 0 && item.options.length <= 200);
   }, [allExcelColumnNames, records]);
 
-  // Apply dynamic filters (both standard and exact Excel column filters) + real-time search
+  // Apply dynamic filters + accent-insensitive multi-term search
   const filteredRecords = useMemo(() => {
     const selectedMunNorm =
       filters.municipio !== 'Todos'
         ? normalizeMunicipioBarinas(filters.municipio)
         : 'Todos';
+    const normPar =
+      filters.parroquia !== 'Todas'
+        ? normalizeSearchText(filters.parroquia)
+        : null;
+    const normCom =
+      filters.comuna !== 'Todas' ? normalizeSearchText(filters.comuna) : null;
+
+    const searchTokens = normalizeSearchText(filters.search)
+      .split(/\s+/)
+      .filter(Boolean);
 
     return records.filter((rec) => {
       if (filters.especie !== 'Todas' && rec.especie !== filters.especie) {
@@ -202,6 +257,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         selectedMunNorm !== 'Todos' &&
         normalizeMunicipioBarinas(rec.municipio) !== selectedMunNorm
       ) {
+        return false;
+      }
+      if (normPar && normalizeSearchText(rec.parroquia || '') !== normPar) {
+        return false;
+      }
+      if (normCom && normalizeSearchText(getComunaText(rec)) !== normCom) {
         return false;
       }
       if (
@@ -216,7 +277,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ) {
         return false;
       }
-      if (filters.fechaInicio && (!rec.fecha || rec.fecha < filters.fechaInicio)) {
+      if (
+        filters.fechaInicio &&
+        (!rec.fecha || rec.fecha < filters.fechaInicio)
+      ) {
         return false;
       }
       if (filters.fechaFin && (!rec.fecha || rec.fecha > filters.fechaFin)) {
@@ -235,25 +299,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       }
 
-      if (filters.search.trim()) {
-        const q = filters.search.toLowerCase().trim();
-        const standardMatch =
-          rec.especie.toLowerCase().includes(q) ||
-          rec.municipio.toLowerCase().includes(q) ||
-          rec.parroquia.toLowerCase().includes(q) ||
-          rec.tipoPesca.toLowerCase().includes(q) ||
-          rec.puntoDistribucion.toLowerCase().includes(q) ||
-          rec.archivoOrigen.toLowerCase().includes(q) ||
-          rec.fecha.includes(q);
+      // Accent-insensitive multi-term search scoped to selected column or all fields
+      if (searchTokens.length > 0) {
+        let haystack = '';
+        const sc = filters.searchColumn;
+        if (sc === '__especie') {
+          haystack = rec.especie;
+        } else if (sc === '__municipio') {
+          haystack = rec.municipio;
+        } else if (sc === '__parroquia') {
+          haystack = rec.parroquia;
+        } else if (sc === '__comuna') {
+          haystack = getComunaText(rec);
+        } else if (sc === '__punto') {
+          haystack = rec.puntoDistribucion;
+        } else if (sc && sc !== 'Todos') {
+          haystack = rec.rawFields?.[sc] ?? '';
+        } else {
+          const rawText = rec.rawFields
+            ? Object.values(rec.rawFields).join(' ')
+            : '';
+          haystack = [
+            rec.especie,
+            rec.municipio,
+            rec.parroquia,
+            getComunaText(rec),
+            rec.tipoPesca,
+            rec.puntoDistribucion,
+            rec.archivoOrigen,
+            rec.fecha,
+            rawText,
+          ].join(' ');
+        }
 
-        const rawMatch = rec.rawFields
-          ? Object.values(rec.rawFields).some((v) =>
-              String(v).toLowerCase().includes(q)
-            )
-          : false;
-
-        if (!standardMatch && !rawMatch) return false;
+        const normHaystack = normalizeSearchText(haystack);
+        for (const tok of searchTokens) {
+          if (!normHaystack.includes(tok)) {
+            return false;
+          }
+        }
       }
+
       return true;
     });
   }, [records, filters]);
@@ -316,134 +402,78 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [filteredRecords, regionalGoalTons]);
 
-  const getMetricValue = (r: FisheryRecord, metric: string): number => {
-    if (metric === 'toneladas') return r.toneladas;
-    if (metric === 'kilogramos') return r.kilogramos ?? r.toneladas * 1000;
-    return r.numericFields?.[metric] ?? 0;
-  };
-
-  const formatMetricVal = (val: number, metric: string): string => {
-    if (metric === 'toneladas') {
-      return `${val.toLocaleString('es-VE', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 3,
-      })} TM`;
+  // Active filter chips for visual clarity & 1-click removal
+  const activeFilterChips = useMemo(() => {
+    const chips: { key: string; label: string; onClear: () => void }[] = [];
+    if (filters.search.trim()) {
+      chips.push({
+        key: 'search',
+        label: `Búsqueda: "${filters.search.trim()}"`,
+        onClear: () => onUpdateFilters({ search: '' }),
+      });
     }
-    if (metric === 'kilogramos') {
-      return `${val.toLocaleString('es-VE', {
-        maximumFractionDigits: 2,
-      })} Kg`;
+    if (filters.municipio !== 'Todos') {
+      chips.push({
+        key: 'municipio',
+        label: `Municipio: ${filters.municipio}`,
+        onClear: () =>
+          onUpdateFilters({
+            municipio: 'Todos',
+            parroquia: 'Todas',
+            comuna: 'Todas',
+          }),
+      });
     }
-    return val.toLocaleString('es-VE', { maximumFractionDigits: 2 });
-  };
-
-  const activeMetricUnit =
-    chartMetric === 'toneladas'
-      ? ' TM'
-      : chartMetric === 'kilogramos'
-      ? ' Kg'
-      : '';
-
-  const activeMetricTitle =
-    chartMetric === 'toneladas'
-      ? 'Toneladas Métricas (TM)'
-      : chartMetric === 'kilogramos'
-      ? 'Kilogramos (Kg)'
-      : chartMetric;
-
-  // 1. Bar Chart Data (exact sum without premature per-row rounding)
-  const barChartData = useMemo(() => {
-    const map = new Map<
-      string,
-      { name: string; value: number; toneladas: number; kilogramos: number; registros: number }
-    >();
-    filteredRecords.forEach((r) => {
-      let key = '';
-      if (barChartMode === 'especie') {
-        key = r.especie;
-      } else if (barChartMode === 'municipio') {
-        key = r.municipio;
-      } else {
-        key = r.rawFields?.[barChartMode] || 'Sin Especificar';
-      }
-      const existing = map.get(key) || {
-        name: key,
-        value: 0,
-        toneladas: 0,
-        kilogramos: 0,
-        registros: 0,
-      };
-      existing.value += getMetricValue(r, chartMetric);
-      existing.toneladas += r.toneladas;
-      existing.kilogramos += r.kilogramos ?? r.toneladas * 1000;
-      existing.registros += 1;
-      map.set(key, existing);
+    if (filters.parroquia !== 'Todas') {
+      chips.push({
+        key: 'parroquia',
+        label: `Parroquia: ${filters.parroquia}`,
+        onClear: () => onUpdateFilters({ parroquia: 'Todas', comuna: 'Todas' }),
+      });
+    }
+    if (filters.comuna !== 'Todas') {
+      chips.push({
+        key: 'comuna',
+        label: `Comuna: ${filters.comuna}`,
+        onClear: () => onUpdateFilters({ comuna: 'Todas' }),
+      });
+    }
+    if (filters.especie !== 'Todas') {
+      chips.push({
+        key: 'especie',
+        label: `Especie: ${filters.especie}`,
+        onClear: () => onUpdateFilters({ especie: 'Todas' }),
+      });
+    }
+    if (filters.archivoOrigen !== 'Todos') {
+      chips.push({
+        key: 'archivo',
+        label: `Archivo: ${filters.archivoOrigen}`,
+        onClear: () => onUpdateFilters({ archivoOrigen: 'Todos' }),
+      });
+    }
+    if (filters.fechaInicio || filters.fechaFin) {
+      chips.push({
+        key: 'fechas',
+        label: `Fecha: ${filters.fechaInicio || '...'} a ${
+          filters.fechaFin || '...'
+        }`,
+        onClear: () => onUpdateFilters({ fechaInicio: '', fechaFin: '' }),
+      });
+    }
+    Object.entries(filters.customFields).forEach(([col, val]) => {
+      chips.push({
+        key: `custom-${col}`,
+        label: `${col}: ${val}`,
+        onClear: () => {
+          const next = { ...filters.customFields };
+          delete next[col];
+          onUpdateFilters({ customFields: next });
+        },
+      });
     });
-    return Array.from(map.values())
-      .map((item) => ({
-        ...item,
-        value: +item.value.toFixed(4),
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [filteredRecords, barChartMode, chartMetric]);
-
-  // 2. Temporal Evolution Data (only records with valid dates)
-  const timeSeriesData = useMemo(() => {
-    const datedRecords = filteredRecords.filter(
-      (r) => r.fecha && r.fecha.trim() !== ''
-    );
-    const map = new Map<string, { fecha: string; value: number }>();
-    const sortedByDate = [...datedRecords].sort((a, b) =>
-      a.fecha.localeCompare(b.fecha)
-    );
-
-    sortedByDate.forEach((r) => {
-      const key = r.fecha;
-      const existing = map.get(key) || {
-        fecha: key,
-        value: 0,
-      };
-      existing.value += getMetricValue(r, chartMetric);
-      map.set(key, existing);
-    });
-
-    let runningTotal = 0;
-    return Array.from(map.values()).map((item) => {
-      runningTotal += item.value;
-      return {
-        fecha: item.fecha,
-        valor: +item.value.toFixed(4),
-        acumulado: +runningTotal.toFixed(4),
-      };
-    });
-  }, [filteredRecords, chartMetric]);
-
-  // 3. Doughnut Distribution Data (supports modalidad, especie, municipio, or any Excel column)
-  const donutChartData = useMemo(() => {
-    const map = new Map<string, number>();
-    filteredRecords.forEach((r) => {
-      let key = '';
-      if (donutMode === 'tipoPesca') {
-        key = r.tipoPesca;
-      } else if (donutMode === 'especie') {
-        key = r.especie;
-      } else if (donutMode === 'municipio') {
-        key = r.municipio;
-      } else {
-        key = r.rawFields?.[donutMode] || 'Sin Especificar';
-      }
-      map.set(key, (map.get(key) || 0) + getMetricValue(r, chartMetric));
-    });
-    return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value: +value.toFixed(4) }))
-      .filter((d) => d.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [filteredRecords, donutMode, chartMetric]);
-
-  const donutTotal = useMemo(
-    () => donutChartData.reduce((sum, item) => sum + item.value, 0),
-    [donutChartData]
-  );
+    return chips;
+  }, [filters, onUpdateFilters]);
 
   // Sorted & Paginated Table Data
   const sortedTableRecords = useMemo(() => {
@@ -501,7 +531,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Top Bar: Left "Venezue Come Pescado" + Right 2 Action Buttons: 1) Inicio 2) Filtros */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5">
         <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-8">
-          {/* Top-left text requested by user */}
           <button
             type="button"
             onClick={onBackToHero}
@@ -510,7 +539,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Venezue Come Pescado
           </button>
 
-          {/* Right: Only 2 Action Buttons: 1) Inicio  2) Filtros */}
           <div className="flex items-center gap-3 shrink-0">
             <button
               type="button"
@@ -581,6 +609,197 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-col lg:flex-row items-start gap-6">
           {/* Área Central (Izquierda/Centro en Desktop, Superior en Móvil) */}
           <div className="flex-1 min-w-0 w-full space-y-6">
+            {/* 0. Barra Integrada de Búsqueda Avanzada y Filtros Rápidos */}
+            <section
+              id="barra-busqueda-filtros"
+              aria-label="Buscador y filtros rápidos"
+              className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3"
+            >
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+                {/* Search Scope Selector */}
+                <select
+                  aria-label="Campo donde buscar"
+                  value={filters.searchColumn}
+                  onChange={(e) => {
+                    onUpdateFilters({ searchColumn: e.target.value });
+                    setCurrentPage(1);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none md:w-52 shrink-0"
+                >
+                  <option value="Todos">Buscar en: Todos los campos</option>
+                  <option value="__especie">Campo: Especie</option>
+                  <option value="__municipio">Campo: Municipio</option>
+                  <option value="__parroquia">Campo: Parroquia</option>
+                  <option value="__comuna">Campo: Comuna / Sector</option>
+                  <option value="__punto">Campo: Punto Distribución</option>
+                  {allExcelColumnNames.map((col) => (
+                    <option key={col} value={col}>
+                      Excel: {col}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Accent-insensitive Multi-term Search Input */}
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={filters.search}
+                    onChange={(e) => {
+                      onUpdateFilters({ search: e.target.value });
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Buscar por municipio, parroquia, comuna, especie o varias palabras..."
+                    className="w-full pl-9 pr-9 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs text-slate-900 placeholder:text-slate-400 focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  />
+                  {filters.search && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onUpdateFilters({ search: '' });
+                        setCurrentPage(1);
+                      }}
+                      aria-label="Limpiar búsqueda"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Live match counter */}
+                <div className="flex items-center justify-between md:justify-end gap-2 shrink-0">
+                  <span className="text-xs font-mono tabular-nums text-slate-600 bg-slate-100 px-3 py-2 rounded-lg whitespace-nowrap">
+                    {filteredRecords.length} de {records.length} reg.
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Cascading Filters Row */}
+              {records.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 pt-1">
+                  <select
+                    aria-label="Filtro rápido por Municipio"
+                    value={filters.municipio}
+                    onChange={(e) => {
+                      onUpdateFilters({
+                        municipio: e.target.value,
+                        parroquia: 'Todas',
+                        comuna: 'Todas',
+                      });
+                      setCurrentPage(1);
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  >
+                    <option value="Todos">
+                      Municipio: Todos ({availableMunicipios.length})
+                    </option>
+                    {availableMunicipios.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.value} ({opt.count})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    aria-label="Filtro rápido por Parroquia"
+                    value={filters.parroquia}
+                    disabled={availableParroquias.length === 0}
+                    onChange={(e) => {
+                      onUpdateFilters({
+                        parroquia: e.target.value,
+                        comuna: 'Todas',
+                      });
+                      setCurrentPage(1);
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none disabled:opacity-50"
+                  >
+                    <option value="Todas">
+                      Parroquia: Todas ({availableParroquias.length})
+                    </option>
+                    {availableParroquias.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.value} ({opt.count})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    aria-label="Filtro rápido por Comuna"
+                    value={filters.comuna}
+                    disabled={availableComunas.length === 0}
+                    onChange={(e) => {
+                      onUpdateFilters({ comuna: e.target.value });
+                      setCurrentPage(1);
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none disabled:opacity-50"
+                  >
+                    <option value="Todas">
+                      Comuna: Todas ({availableComunas.length})
+                    </option>
+                    {availableComunas.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.value} ({opt.count})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    aria-label="Filtro rápido por Especie"
+                    value={filters.especie}
+                    onChange={(e) => {
+                      onUpdateFilters({ especie: e.target.value });
+                      setCurrentPage(1);
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  >
+                    <option value="Todas">
+                      Especie: Todas ({availableSpecies.length})
+                    </option>
+                    {availableSpecies.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.value} ({opt.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Active Filters Strip */}
+              {activeFilterChips.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Filtros activos:
+                  </span>
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={() => {
+                        chip.onClear();
+                        setCurrentPage(1);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-50 border border-cyan-200 text-[11px] font-semibold text-cyan-900 hover:bg-cyan-100 transition-colors cursor-pointer"
+                    >
+                      <span>{chip.label}</span>
+                      <X className="w-3 h-3 text-cyan-700" />
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onResetFilters();
+                      setCurrentPage(1);
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900 ml-auto cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Limpiar todo</span>
+                  </button>
+                </div>
+              )}
+            </section>
+
             {/* 1. Tarjetas Superiores de KPIs (Inician en 0 hasta subir Excel) */}
             <section
               id="seccion-kpis"
@@ -632,7 +851,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {/* KPI 3: Jornadas / Municipios */}
                 <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
                   <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                    <span>Registros / Municipios</span>
+                    <span>Jornadas / Municipios</span>
                     <MapPin className="w-4 h-4 text-amber-500" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
@@ -671,7 +890,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Barra de Cumplimiento de Meta Regional + Acciones Rápidas */}
+              {/* Barra de Cumplimiento Regional + Acciones Rápidas */}
               <div className="bg-white rounded-xl border border-slate-200 p-4 sm:px-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
@@ -769,453 +988,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </section>
 
-            {/* 2. Mapa Interactivo del Estado Barinas y Semáforo Municipal */}
+            {/* 2. Indicador Dinámico por Especie Hidrobiológica */}
+            <SpeciesDynamicIndicator
+              records={filteredRecords}
+              selectedSpecies={filters.especie}
+              onSelectSpecies={(especie) => {
+                onUpdateFilters({ especie });
+                setCurrentPage(1);
+              }}
+            />
+
+            {/* 3. Gráfico Dinámico de Jornadas por Municipio, Parroquia y Comuna */}
+            <TerritorialJornadasChart
+              records={filteredRecords}
+              selectedMunicipio={filters.municipio}
+              selectedParroquia={filters.parroquia}
+              selectedComuna={filters.comuna}
+              onSelectMunicipio={(municipio) => {
+                onUpdateFilters({
+                  municipio,
+                  parroquia: 'Todas',
+                  comuna: 'Todas',
+                });
+                setCurrentPage(1);
+              }}
+              onSelectParroquia={(parroquia) => {
+                onUpdateFilters({ parroquia, comuna: 'Todas' });
+                setCurrentPage(1);
+              }}
+              onSelectComuna={(comuna) => {
+                onUpdateFilters({ comuna });
+                setCurrentPage(1);
+              }}
+              onQuickUpload={() => quickFileInputRef.current?.click()}
+            />
+
+            {/* 4. Mapa Territorial del Estado Barinas (Sin Semáforo de Meta Municipal) */}
             <BarinasMap
               records={filteredRecords}
               selectedMunicipio={filters.municipio}
               onSelectMunicipio={(municipio) => {
-                onUpdateFilters({ municipio });
+                onUpdateFilters({
+                  municipio,
+                  parroquia: 'Todas',
+                  comuna: 'Todas',
+                });
                 setCurrentPage(1);
               }}
-              regionalGoalTons={regionalGoalTons}
             />
 
-            {/* 3. Gráficos Interactivos */}
-            <section
-              id="seccion-graficos"
-              aria-label="Visualizaciones analíticas"
-              className="space-y-6"
-            >
-              {/* Gráfico Principal de Barras: Volumen por Especie / Municipio / Campo del Excel */}
-              <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                      Comparativa de {activeMetricTitle}
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Suma exacta acumulada desde los registros del archivo Excel cargado
-                    </p>
-                  </div>
-
-                  {/* Interactive Metric Unit & Group-By Selectors */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => setChartMetric('toneladas')}
-                        className={`px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          chartMetric === 'toneladas'
-                            ? 'bg-white text-cyan-800 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        TM
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setChartMetric('kilogramos')}
-                        className={`px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          chartMetric === 'kilogramos'
-                            ? 'bg-white text-cyan-800 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Kg
-                      </button>
-                    </div>
-
-                    {allNumericColumns.length > 0 && (
-                      <select
-                        aria-label="Métrica numérica del gráfico"
-                        value={chartMetric}
-                        onChange={(e) => setChartMetric(e.target.value)}
-                        className="rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none"
-                      >
-                        <option value="toneladas">Métrica: Toneladas (TM)</option>
-                        <option value="kilogramos">Métrica: Kilogramos (Kg)</option>
-                        {allNumericColumns.map((numCol) => (
-                          <option key={numCol} value={numCol}>
-                            Columna: {numCol}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-
-                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => setBarChartMode('especie')}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          barChartMode === 'especie'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Por Especie
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBarChartMode('municipio')}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          barChartMode === 'municipio'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Por Municipio
-                      </button>
-                    </div>
-
-                    {dynamicExcelColumns.length > 0 && (
-                      <select
-                        aria-label="Agrupar gráfico por campo del Excel"
-                        value={barChartMode}
-                        onChange={(e) => setBarChartMode(e.target.value)}
-                        className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none"
-                      >
-                        <option value="especie">Agrupar: Especie</option>
-                        <option value="municipio">Agrupar: Municipio</option>
-                        {dynamicExcelColumns.map((col) => (
-                          <option key={col.column} value={col.column}>
-                            Campo Excel: {col.column}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                </div>
-
-                {barChartData.length === 0 ? (
-                  <div className="h-72 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                    <FileSpreadsheet className="w-8 h-8 text-slate-400 mb-2" />
-                    <p className="text-sm font-semibold text-slate-700 mb-1">
-                      Datos en cero (0) — Sin registros cargados
-                    </p>
-                    <p className="text-xs text-slate-500 mb-4 max-w-md">
-                      Adjunta tu archivo Excel (.xlsx / .xls) para visualizar el gráfico de barras con los datos de la jornada.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => quickFileInputRef.current?.click()}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-700 transition-colors cursor-pointer"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Adjuntar archivo Excel</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="h-72 sm:h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={barChartData}
-                        margin={{ top: 8, right: 16, left: 0, bottom: 24 }}
-                      >
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          vertical={false}
-                          stroke="#e2e8f0"
-                        />
-                        <XAxis
-                          dataKey="name"
-                          tick={{ fontSize: 11, fill: '#475569' }}
-                          interval={0}
-                          angle={-18}
-                          textAnchor="end"
-                          height={50}
-                        />
-                        <YAxis
-                          tick={{ fontSize: 11, fill: '#475569' }}
-                          unit={activeMetricUnit}
-                        />
-                        <Tooltip
-                          formatter={(value: unknown) => {
-                            const num = Number(value ?? 0);
-                            if (chartMetric === 'toneladas') {
-                              return [
-                                `${num.toLocaleString('es-VE', {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 3,
-                                })} TM (${(num * 1000).toLocaleString('es-VE', {
-                                  maximumFractionDigits: 1,
-                                })} Kg)`,
-                                'Volumen',
-                              ];
-                            }
-                            if (chartMetric === 'kilogramos') {
-                              return [
-                                `${num.toLocaleString('es-VE', {
-                                  maximumFractionDigits: 2,
-                                })} Kg (${(num / 1000).toFixed(3)} TM)`,
-                                'Volumen',
-                              ];
-                            }
-                            return [
-                              num.toLocaleString('es-VE', {
-                                maximumFractionDigits: 2,
-                              }),
-                              chartMetric,
-                            ];
-                          }}
-                          contentStyle={{
-                            backgroundColor: '#0f172a',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: '#f8fafc',
-                            fontSize: '12px',
-                          }}
-                        />
-                        <Bar
-                          dataKey="value"
-                          name={activeMetricTitle}
-                          fill="#0284c7"
-                          radius={[6, 6, 0, 0]}
-                          maxBarSize={54}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-
-              {/* Segunda Fila de Gráficos: Evolución Temporal + Distribución (Dona) */}
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                {/* Gráfico de Líneas / Evolución Temporal (7 cols) */}
-                <div className="xl:col-span-7 bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs">
-                  <div className="mb-5">
-                    <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                      Evolución Temporal de Captura y Jornadas
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {activeMetricTitle} por fecha y curva de crecimiento acumulado
-                    </p>
-                  </div>
-
-                  {timeSeriesData.length === 0 ? (
-                    <div className="h-64 flex flex-col items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500 p-4 text-center">
-                      <span>
-                        {filteredRecords.length === 0
-                          ? 'Gráfico en 0 — Adjunta un archivo Excel para graficar la evolución temporal'
-                          : 'El archivo Excel cargado no incluye una columna de Fecha válida para la serie temporal'}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="h-64 sm:h-72 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                          data={timeSeriesData}
-                          margin={{ top: 10, right: 16, left: 0, bottom: 10 }}
-                        >
-                          <defs>
-                            <linearGradient
-                              id="colorAcumulado"
-                              x1="0"
-                              y1="0"
-                              x2="0"
-                              y2="1"
-                            >
-                              <stop
-                                offset="5%"
-                                stopColor="#06b6d4"
-                                stopOpacity={0.35}
-                              />
-                              <stop
-                                offset="95%"
-                                stopColor="#06b6d4"
-                                stopOpacity={0.02}
-                              />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            vertical={false}
-                            stroke="#e2e8f0"
-                          />
-                          <XAxis
-                            dataKey="fecha"
-                            tick={{ fontSize: 11, fill: '#475569' }}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 11, fill: '#475569' }}
-                            unit={activeMetricUnit}
-                          />
-                          <Tooltip
-                            formatter={(value: unknown, name: unknown) => [
-                              formatMetricVal(Number(value ?? 0), chartMetric),
-                              String(name ?? ''),
-                            ]}
-                            contentStyle={{
-                              backgroundColor: '#0f172a',
-                              border: 'none',
-                              borderRadius: '8px',
-                              color: '#f8fafc',
-                              fontSize: '12px',
-                            }}
-                          />
-                          <Legend
-                            wrapperStyle={{
-                              fontSize: '12px',
-                              paddingTop: '8px',
-                            }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="acumulado"
-                            name={`Acumulado${activeMetricUnit ? ` (${activeMetricUnit.trim()})` : ''}`}
-                            stroke="#0891b2"
-                            strokeWidth={2.5}
-                            fillOpacity={1}
-                            fill="url(#colorAcumulado)"
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="valor"
-                            name={`Por Fecha${activeMetricUnit ? ` (${activeMetricUnit.trim()})` : ''}`}
-                            stroke="#0f172a"
-                            strokeWidth={2}
-                            fillOpacity={0.1}
-                            fill="#0f172a"
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
-
-                {/* Gráfico de Dona: Distribución Porcentual (5 cols) */}
-                <div className="xl:col-span-5 bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-                  <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                        Distribución de Aporte
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Total: {formatMetricVal(donutTotal, chartMetric)}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                        <button
-                          type="button"
-                          onClick={() => setDonutMode('tipoPesca')}
-                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
-                            donutMode === 'tipoPesca'
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          Modalidad
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDonutMode('especie')}
-                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
-                            donutMode === 'especie'
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          Especie
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDonutMode('municipio')}
-                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
-                            donutMode === 'municipio'
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          Municipio
-                        </button>
-                      </div>
-
-                      {dynamicExcelColumns.length > 0 && (
-                        <select
-                          aria-label="Agrupar distribución por campo del Excel"
-                          value={donutMode}
-                          onChange={(e) => setDonutMode(e.target.value)}
-                          className="rounded-lg border border-slate-300 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none max-w-[140px]"
-                        >
-                          <option value="tipoPesca">Modalidad</option>
-                          <option value="especie">Especie</option>
-                          <option value="municipio">Municipio</option>
-                          {dynamicExcelColumns.map((col) => (
-                            <option key={col.column} value={col.column}>
-                              {col.column}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  </div>
-
-                  {donutChartData.length === 0 ? (
-                    <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500 p-4 text-center">
-                      <span>Distribución en 0% — Sube tu archivo Excel para calcular proporciones</span>
-                    </div>
-                  ) : (
-                    <div className="h-64 sm:h-72 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={donutChartData}
-                            cx="50%"
-                            cy="46%"
-                            innerRadius={52}
-                            outerRadius={82}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {donutChartData.map((entry, index) => (
-                              <Cell
-                                key={`cell-${entry.name}`}
-                                fill={CHART_COLORS[index % CHART_COLORS.length]}
-                              />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: unknown) => {
-                              const num = Number(value ?? 0);
-                              const pct =
-                                donutTotal > 0
-                                  ? ((num / donutTotal) * 100).toFixed(1)
-                                  : '0.0';
-                              return [
-                                `${formatMetricVal(num, chartMetric)} (${pct}%)`,
-                                'Aporte',
-                              ];
-                            }}
-                            contentStyle={{
-                              backgroundColor: '#0f172a',
-                              border: 'none',
-                              borderRadius: '8px',
-                              color: '#f8fafc',
-                              fontSize: '12px',
-                            }}
-                          />
-                          <Legend
-                            wrapperStyle={{ fontSize: '11px' }}
-                            layout="horizontal"
-                            verticalAlign="bottom"
-                            align="center"
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* 4. Tabla de Datos Paginada con Columnas del Formato Excel Adjuntado */}
+            {/* 5. Tabla de Datos Paginada con Columnas del Formato Excel Adjuntado */}
             <section
               id="seccion-tabla"
               aria-label="Tabla de registros acumulados"
               className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden"
             >
-              {/* Table Header & Real-time Search Bar */}
+              {/* Table Header */}
               <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 tracking-tight">
@@ -1262,21 +1090,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                   )}
 
-                  {/* Buscador en tiempo real */}
-                  <div className="relative min-w-[210px] sm:min-w-[240px] flex-1 sm:flex-none">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="search"
-                      value={filters.search}
-                      onChange={(e) => {
-                        onUpdateFilters({ search: e.target.value });
-                        setCurrentPage(1);
-                      }}
-                      placeholder="Buscar en cualquier campo del Excel..."
-                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs text-slate-900 placeholder:text-slate-400 focus:border-cyan-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-
                   {/* Export Consolidated Data Button */}
                   <button
                     type="button"
@@ -1293,7 +1106,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {/* High-Density Data Grid */}
               <div className="overflow-x-auto">
                 {tableViewMode === 'excel' && allExcelColumnNames.length > 0 ? (
-                  /* Dynamic Table Showing Exact Columns from Uploaded Excel */
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
@@ -1360,7 +1172,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </tbody>
                   </table>
                 ) : (
-                  /* Standard Summary Table */
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
@@ -1390,7 +1201,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             onClick={() => handleSort('municipio')}
                             className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
                           >
-                            <span>Municipio / Parroquia</span>
+                            <span>Municipio / Parroquia / Comuna</span>
                             <ArrowUpDown className="w-3 h-3" />
                           </button>
                         </th>
@@ -1410,7 +1221,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             onClick={() => handleSort('toneladas')}
                             className="inline-flex items-center justify-end gap-1 hover:text-slate-900 cursor-pointer ml-auto"
                           >
-                            <span>Volumen (TM)</span>
+                            <span>Volumen</span>
                             <ArrowUpDown className="w-3 h-3" />
                           </button>
                         </th>
@@ -1467,6 +1278,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <span className="text-slate-500">
                                 {row.parroquia}
                               </span>
+                              {getComunaText(row) !== '-' && (
+                                <>
+                                  <span
+                                    className="text-slate-400 mx-1.5"
+                                    aria-hidden="true"
+                                  >
+                                    ·
+                                  </span>
+                                  <span className="text-cyan-700 font-medium">
+                                    {getComunaText(row)}
+                                  </span>
+                                </>
+                              )}
                             </td>
                             <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                               {row.tipoPesca}
@@ -1601,7 +1425,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             }}
             availableSpecies={availableSpecies}
             availableMunicipios={availableMunicipios}
+            availableParroquias={availableParroquias}
+            availableComunas={availableComunas}
             availableTiposPesca={availableTiposPesca}
+            allExcelColumnNames={allExcelColumnNames}
             dynamicExcelColumns={dynamicExcelColumns}
             hasDateData={hasDateData}
             isUploading={isUploading}

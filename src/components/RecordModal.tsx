@@ -56,6 +56,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [especie, setEspecie] = useState('Cachama Negra');
   const [municipio, setMunicipio] = useState('Barinas');
   const [parroquia, setParroquia] = useState('El Carmen');
+  const [comuna, setComuna] = useState('Comuna Central');
   const [tipoPesca, setTipoPesca] = useState('Feria / Jornada Social');
   const [toneladas, setToneladas] = useState('4.50');
   const [familiasBeneficiadas, setFamiliasBeneficiadas] = useState('1125');
@@ -69,6 +70,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setEspecie(initialRecord.especie);
       setMunicipio(initialRecord.municipio);
       setParroquia(initialRecord.parroquia);
+      setComuna(initialRecord.comuna || '');
       setTipoPesca(initialRecord.tipoPesca);
       setToneladas(String(initialRecord.toneladas));
       setFamiliasBeneficiadas(String(initialRecord.familiasBeneficiadas));
@@ -78,6 +80,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setEspecie('Cachama Negra');
       setMunicipio('Barinas');
       setParroquia('Alto Barinas');
+      setComuna('');
       setTipoPesca('Feria / Jornada Social');
       setToneladas('3.50');
       setFamiliasBeneficiadas('875');
@@ -91,8 +94,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     e.preventDefault();
     const parsedTons = Math.max(0.05, parseFloat(toneladas) || 1);
     const parsedFamilias = Math.max(
-      1,
-      parseInt(familiasBeneficiadas, 10) || Math.round(parsedTons * 250)
+      0,
+      parseInt(familiasBeneficiadas, 10) || 0
     );
 
     onSave(
@@ -101,6 +104,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         especie: especie.trim() || 'Cachama Negra',
         municipio,
         parroquia: parroquia.trim() || `Casco Central ${municipio}`,
+        comuna: comuna.trim() || '-',
         tipoPesca,
         toneladas: +parsedTons.toFixed(2),
         familiasBeneficiadas: parsedFamilias,
@@ -193,7 +197,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
-                Parroquia / Sector
+                Parroquia
               </label>
               <input
                 type="text"
@@ -201,6 +205,19 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 value={parroquia}
                 onChange={(e) => setParroquia(e.target.value)}
                 placeholder="Ej. Alto Barinas"
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:border-cyan-600 focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Comuna / Sector
+              </label>
+              <input
+                type="text"
+                value={comuna}
+                onChange={(e) => setComuna(e.target.value)}
+                placeholder="Ej. Comuna Chávez Frías"
                 className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:border-cyan-600 focus:bg-white focus:outline-none"
               />
             </div>
@@ -232,13 +249,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 min="0.01"
                 required
                 value={toneladas}
-                onChange={(e) => {
-                  setToneladas(e.target.value);
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    setFamiliasBeneficiadas(String(Math.round(val * 250)));
-                  }
-                }}
+                onChange={(e) => setToneladas(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono tabular-nums text-slate-900 focus:border-cyan-600 focus:bg-white focus:outline-none"
               />
             </div>
@@ -249,7 +260,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               </label>
               <input
                 type="number"
-                min="1"
+                min="0"
                 required
                 value={familiasBeneficiadas}
                 onChange={(e) => setFamiliasBeneficiadas(e.target.value)}

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Upload,
   FileSpreadsheet,
@@ -10,9 +10,15 @@ import {
   X,
   Calendar,
   AlertCircle,
+  Search,
 } from 'lucide-react';
 import { FilterState, UploadedFileMeta } from '../types/fishery';
-import { downloadSampleExcelTemplate } from '../data/demoData';
+import { downloadSampleExcelTemplate, normalizeKey } from '../data/demoData';
+
+export interface FilterOptionCount {
+  value: string;
+  count: number;
+}
 
 interface ControlSidebarProps {
   uploadedFiles: UploadedFileMeta[];
@@ -22,9 +28,12 @@ interface ControlSidebarProps {
   filters: FilterState;
   onUpdateFilters: (next: Partial<FilterState>) => void;
   onResetFilters: () => void;
-  availableSpecies: string[];
-  availableMunicipios: string[];
+  availableSpecies: FilterOptionCount[];
+  availableMunicipios: FilterOptionCount[];
+  availableParroquias: FilterOptionCount[];
+  availableComunas: FilterOptionCount[];
   availableTiposPesca: string[];
+  allExcelColumnNames: string[];
   /** Dynamic columns and their unique values extracted from the attached Excel file(s) */
   dynamicExcelColumns: { column: string; options: string[] }[];
   hasDateData: boolean;
@@ -33,6 +42,25 @@ interface ControlSidebarProps {
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
+
+const CORE_NORM_COLS = new Set([
+  'especie',
+  'especies',
+  'pescado',
+  'rubro',
+  'producto',
+  'municipio',
+  'municipios',
+  'parroquia',
+  'parroquias',
+  'comuna',
+  'comunas',
+  'circuitocomunal',
+  'consejocomunal',
+  'fecha',
+  'fechajornada',
+  'fecharegistro',
+]);
 
 export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   uploadedFiles,
@@ -44,7 +72,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   onResetFilters,
   availableSpecies,
   availableMunicipios,
+  availableParroquias,
+  availableComunas,
   availableTiposPesca,
+  allExcelColumnNames,
   dynamicExcelColumns,
   hasDateData,
   isUploading,
@@ -102,17 +133,25 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
     onUpdateFilters({ customFields: nextCustom });
   };
 
+  // Extra Excel columns that aren't already represented by dedicated Municipio/Parroquia/Comuna/Especie/Fecha filters
+  const extraExcelColumns = useMemo(() => {
+    return dynamicExcelColumns.filter(
+      (item) => !CORE_NORM_COLS.has(normalizeKey(item.column))
+    );
+  }, [dynamicExcelColumns]);
+
   const activeCustomCount = Object.keys(filters.customFields).length;
   const activeFilterCount =
+    (filters.search.trim() ? 1 : 0) +
     (filters.especie !== 'Todas' ? 1 : 0) +
     (filters.municipio !== 'Todos' ? 1 : 0) +
+    (filters.parroquia !== 'Todas' ? 1 : 0) +
+    (filters.comuna !== 'Todas' ? 1 : 0) +
     (filters.archivoOrigen !== 'Todos' ? 1 : 0) +
     (filters.fechaInicio ? 1 : 0) +
     (filters.fechaFin ? 1 : 0) +
     filters.tipoPesca.length +
     activeCustomCount;
-
-  const hasDynamicExcelCols = dynamicExcelColumns.length > 0;
 
   const sidebarContent = (
     <div id="panel-control-filtros" className="flex flex-col gap-6">
@@ -221,7 +260,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <div className="py-4 px-3 rounded-lg bg-slate-50 text-center">
               <FileSpreadsheet className="w-5 h-5 text-slate-400 mx-auto mb-1" />
               <p className="text-xs text-slate-500">
-                Datos en cero (0). Adjunta un archivo Excel para cargar los indicadores y habilitar todos los campos de filtro.
+                Datos en cero (0). Adjunta un archivo Excel para cargar los indicadores y habilitar los filtros.
               </p>
             </div>
           ) : (
@@ -316,13 +355,13 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         </div>
       </div>
 
-      {/* 2. Sección de Filtros Dinámicos por Campos del Excel */}
+      {/* 2. Sección de Filtros y Búsqueda */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-cyan-700" />
             <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-              Filtros del Formato Excel
+              Búsqueda y Filtros
             </h3>
           </div>
           {activeFilterCount > 0 && (
@@ -332,19 +371,178 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-700 hover:text-cyan-900 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Restablecer ({activeFilterCount})</span>
+              <span>Limpiar ({activeFilterCount})</span>
             </button>
           )}
         </div>
 
         <div className="space-y-4">
-          {/* Dynamic filters generated directly from every column in the uploaded Excel file */}
-          {hasDynamicExcelCols ? (
-            <div className="space-y-3">
+          {/* Buscador Inteligente dentro del Panel */}
+          <div className="space-y-2">
+            <label
+              htmlFor="sidebar-search"
+              className="block text-xs font-semibold text-slate-700"
+            >
+              Búsqueda por palabra clave
+            </label>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="sidebar-search"
+                type="search"
+                value={filters.search}
+                onChange={(e) => onUpdateFilters({ search: e.target.value })}
+                placeholder="Ej. Barinas cachama..."
+                className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs text-slate-900 placeholder:text-slate-400 focus:border-cyan-600 focus:bg-white focus:outline-none"
+              />
+            </div>
+            <select
+              aria-label="Columna de búsqueda"
+              value={filters.searchColumn}
+              onChange={(e) =>
+                onUpdateFilters({ searchColumn: e.target.value })
+              }
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-800 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+            >
+              <option value="Todos">Buscar en: Todos los campos</option>
+              <option value="__especie">Solo en Especie</option>
+              <option value="__municipio">Solo en Municipio</option>
+              <option value="__parroquia">Solo en Parroquia</option>
+              <option value="__comuna">Solo en Comuna / Sector</option>
+              <option value="__punto">Solo en Punto de Distribución</option>
+              {allExcelColumnNames.map((col) => (
+                <option key={col} value={col}>
+                  Columna Excel: {col}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filtros Territoriales en Cascada */}
+          <div className="pt-3 border-t border-slate-100 space-y-3">
+            <div>
+              <label
+                htmlFor="filter-municipio"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Municipio (Barinas)
+              </label>
+              <select
+                id="filter-municipio"
+                value={filters.municipio}
+                onChange={(e) =>
+                  onUpdateFilters({
+                    municipio: e.target.value,
+                    parroquia: 'Todas',
+                    comuna: 'Todas',
+                  })
+                }
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+              >
+                <option value="Todos">
+                  Todos los municipios ({availableMunicipios.length})
+                </option>
+                {availableMunicipios.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value} ({opt.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {availableParroquias.length > 0 && (
+              <div>
+                <label
+                  htmlFor="filter-parroquia"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Parroquia
+                </label>
+                <select
+                  id="filter-parroquia"
+                  value={filters.parroquia}
+                  onChange={(e) =>
+                    onUpdateFilters({
+                      parroquia: e.target.value,
+                      comuna: 'Todas',
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+                >
+                  <option value="Todas">
+                    Todas las parroquias ({availableParroquias.length})
+                  </option>
+                  {availableParroquias.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.value} ({opt.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {availableComunas.length > 0 && (
+              <div>
+                <label
+                  htmlFor="filter-comuna"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Comuna / Sector
+                </label>
+                <select
+                  id="filter-comuna"
+                  value={filters.comuna}
+                  onChange={(e) =>
+                    onUpdateFilters({ comuna: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+                >
+                  <option value="Todas">
+                    Todas las comunas ({availableComunas.length})
+                  </option>
+                  {availableComunas.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.value} ({opt.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="filter-especie"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Especie / Rubro
+              </label>
+              <select
+                id="filter-especie"
+                value={filters.especie}
+                onChange={(e) =>
+                  onUpdateFilters({ especie: e.target.value })
+                }
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+              >
+                <option value="Todas">
+                  Todas las especies ({availableSpecies.length})
+                </option>
+                {availableSpecies.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value} ({opt.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Otros Campos Dinámicos del Excel */}
+          {extraExcelColumns.length > 0 && (
+            <div className="pt-3 border-t border-slate-100 space-y-3">
               <span className="block text-[11px] font-semibold text-cyan-800">
-                Campos detectados en el Excel ({dynamicExcelColumns.length})
+                Otros campos del Excel ({extraExcelColumns.length})
               </span>
-              {dynamicExcelColumns.map(({ column, options }) => (
+              {extraExcelColumns.map(({ column, options }) => (
                 <div key={column}>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     {column}
@@ -366,94 +564,39 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 </div>
               ))}
             </div>
-          ) : (
-            /* Fallback standard filters when using manual entries or empty state */
-            <>
-              <div>
-                <label
-                  htmlFor="filter-especie"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
-                >
-                  Especie / Rubro
-                </label>
-                <select
-                  id="filter-especie"
-                  value={filters.especie}
-                  onChange={(e) =>
-                    onUpdateFilters({ especie: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
-                >
-                  <option value="Todas">
-                    Todas las especies ({availableSpecies.length})
-                  </option>
-                  {availableSpecies.map((esp) => (
-                    <option key={esp} value={esp}>
-                      {esp}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          )}
 
-              <div>
-                <label
-                  htmlFor="filter-municipio"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
-                >
-                  Municipio (Región Barinas)
-                </label>
-                <select
-                  id="filter-municipio"
-                  value={filters.municipio}
-                  onChange={(e) =>
-                    onUpdateFilters({ municipio: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
-                >
-                  <option value="Todos">
-                    Todos los municipios ({availableMunicipios.length})
-                  </option>
-                  {availableMunicipios.map((mun) => (
-                    <option key={mun} value={mun}>
-                      {mun}
-                    </option>
-                  ))}
-                </select>
+          {availableTiposPesca.length > 1 && extraExcelColumns.length === 0 && (
+            <div className="pt-3 border-t border-slate-100">
+              <span className="block text-xs font-semibold text-slate-700 mb-2">
+                Modalidad / Operativo
+              </span>
+              <div className="space-y-1.5">
+                {availableTiposPesca.map((tipo) => {
+                  const checked = filters.tipoPesca.includes(tipo);
+                  return (
+                    <label
+                      key={tipo}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
+                          : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleTipoPesca(tipo)}
+                          className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                        />
+                        <span className="truncate">{tipo}</span>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
-
-              {availableTiposPesca.length > 0 && (
-                <div>
-                  <span className="block text-xs font-semibold text-slate-700 mb-2">
-                    Modalidad / Operativo
-                  </span>
-                  <div className="space-y-1.5">
-                    {availableTiposPesca.map((tipo) => {
-                      const checked = filters.tipoPesca.includes(tipo);
-                      return (
-                        <label
-                          key={tipo}
-                          className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                            checked
-                              ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
-                              : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleTipoPesca(tipo)}
-                              className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                            />
-                            <span className="truncate">{tipo}</span>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </>
+            </div>
           )}
 
           {uploadedFiles.length > 1 && (
@@ -482,7 +625,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             </div>
           )}
 
-          {/* Rango de Fechas (Only shown when date data exists or user wants to filter dates) */}
+          {/* Rango de Fechas (Only shown when date data exists) */}
           {hasDateData && (
             <div className="pt-3 border-t border-slate-100">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
