@@ -10,6 +10,7 @@ import {
   X,
   Calendar,
   AlertCircle,
+  AlertTriangle,
   Search,
 } from 'lucide-react';
 import { FilterState, UploadedFileMeta } from '../types/fishery';
@@ -38,7 +39,7 @@ interface ControlSidebarProps {
   dynamicExcelColumns: { column: string; options: string[] }[];
   hasDateData: boolean;
   isUploading: boolean;
-  uploadFeedback: { type: 'success' | 'error'; message: string } | null;
+  uploadFeedback: { type: 'success' | 'error' | 'warning'; message: string } | null;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -231,11 +232,15 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             className={`mt-3 p-3 rounded-lg text-xs flex items-start gap-2 ${
               uploadFeedback.type === 'success'
                 ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                : uploadFeedback.type === 'warning'
+                ? 'bg-amber-50 text-amber-900 border border-amber-200'
                 : 'bg-rose-50 text-rose-900 border border-rose-200'
             }`}
           >
             {uploadFeedback.type === 'success' ? (
               <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : uploadFeedback.type === 'warning' ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             ) : (
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             )}

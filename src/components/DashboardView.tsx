@@ -21,6 +21,9 @@ import {
   FileSpreadsheet,
   X,
   RotateCcw,
+  AlertTriangle,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   FilterState,
@@ -63,7 +66,7 @@ interface DashboardViewProps {
   onUpdateFilters: (next: Partial<FilterState>) => void;
   onResetFilters: () => void;
   isUploading: boolean;
-  uploadFeedback: { type: 'success' | 'error'; message: string } | null;
+  uploadFeedback: { type: 'success' | 'error' | 'warning'; message: string } | null;
 }
 
 type SortField =
@@ -621,6 +624,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span>Adjuntar Archivo Excel</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Upload / Validation Status Feedback Banner */}
+        {uploadFeedback && (
+          <div
+            role="status"
+            className={`mb-5 rounded-xl px-4 py-3 text-xs flex items-start sm:items-center gap-2.5 border ${
+              uploadFeedback.type === 'success'
+                ? 'bg-emerald-50 text-emerald-950 border-emerald-200'
+                : uploadFeedback.type === 'warning'
+                ? 'bg-amber-50 text-amber-950 border-amber-200'
+                : 'bg-rose-50 text-rose-950 border-rose-200'
+            }`}
+          >
+            {uploadFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+            ) : uploadFeedback.type === 'warning' ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5 sm:mt-0" />
+            )}
+            <span className="font-medium leading-snug">
+              {uploadFeedback.message}
+            </span>
           </div>
         )}
 

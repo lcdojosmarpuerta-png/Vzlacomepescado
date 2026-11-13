@@ -1,9 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { FilterState, FisheryRecord, UploadedFileMeta } from './types/fishery';
-import { parseExcelBuffer, isValidFisheryRecord } from './data/demoData';
+import {
+  BatchValidationSummary,
+  FilterState,
+  FisheryRecord,
+  UploadedFileMeta,
+  ValidatedRecordItem,
+} from './types/fishery';
+import {
+  buildBatchValidationSummary,
+  isValidFisheryRecord,
+  parseExcelBuffer,
+  validateFisheryRecord,
+} from './data/demoData';
 import { HeroLanding } from './components/HeroLanding';
 import { DashboardView } from './components/DashboardView';
 import { StickyFooter } from './components/StickyFooter';
+import { ValidationReportModal } from './components/ValidationReportModal';
 
 const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v3';
 const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v3';
@@ -71,9 +83,11 @@ export default function App() {
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadFeedback, setUploadFeedback] = useState<{
-    type: 'success' | 'error';
+    type: 'success' | 'error' | 'warning';
     message: string;
   } | null>(null);
+  const [pendingValidation, setPendingValidation] =
+    useState<BatchValidationSummary | null>(null);
 
   // Sync cumulative state to localStorage
   useEffect(() => {
@@ -93,13 +107,85 @@ export default function App() {
     }
   }, [regionalGoalTons]);
 
-  // Cumulative Excel File Upload Handler
+  // Commits a validated subset of records and updates file metadata accordingly
+  const commitValidatedBatch = (
+    recordsToCommit: FisheryRecord[],
+    candidateFilesMeta: UploadedFileMeta[],
+    summary: BatchValidationSummary
+  ) => {
+    if (recordsToCommit.length === 0) {
+      setPendingValidation(null);
+      setUploadFeedback({
+        type: 'error',
+        message:
+          'No se agregaron registros al estado global porque no quedaron filas válidas tras la validación.',
+      });
+      return;
+    }
+
+    const recordsByFile = new Map<string, FisheryRecord[]>();
+    recordsToCommit.forEach((rec) => {
+      const list = recordsByFile.get(rec.archivoOrigen) || [];
+      list.push(rec);
+      recordsByFile.set(rec.archivoOrigen, list);
+    });
+
+    const finalFilesMeta: UploadedFileMeta[] = [];
+    candidateFilesMeta.forEach((meta) => {
+      const fileRecs = recordsByFile.get(meta.name);
+      if (!fileRecs || fileRecs.length === 0) return;
+      const fileToneladas = fileRecs.reduce((sum, r) => sum + r.toneladas, 0);
+      const fileKilogramos = fileRecs.reduce((sum, r) => sum + r.kilogramos, 0);
+      finalFilesMeta.push({
+        ...meta,
+        recordCount: fileRecs.length,
+        totalToneladas: +fileToneladas.toFixed(3),
+        totalKilogramos: +fileKilogramos.toFixed(2),
+      });
+    });
+
+    setUploadedRecords((prev) => [...prev, ...recordsToCommit]);
+    setUploadedFiles((prev) => [...prev, ...finalFilesMeta]);
+    setPendingValidation(null);
+
+    const addedKg = recordsToCommit.reduce((s, r) => s + r.kilogramos, 0);
+    const addedTons = recordsToCommit.reduce((s, r) => s + r.toneladas, 0);
+    const omittedCount = summary.totalRowsEvaluated - recordsToCommit.length;
+
+    if (omittedCount > 0) {
+      setUploadFeedback({
+        type: 'warning',
+        message: `Se cargaron ${recordsToCommit.length} registros válidos (${addedKg.toLocaleString(
+          'es-VE',
+          { maximumFractionDigits: 2 }
+        )} Kg · ${addedTons.toFixed(
+          2
+        )} TM). Se excluyeron ${omittedCount} ${
+          omittedCount === 1 ? 'fila con observaciones' : 'filas con observaciones'
+        } detectadas en la validación.`,
+      });
+    } else {
+      setUploadFeedback({
+        type: 'success',
+        message: `Se cargaron ${recordsToCommit.length} registros exactos (${addedKg.toLocaleString(
+          'es-VE',
+          { maximumFractionDigits: 2 }
+        )} Kg · ${addedTons.toFixed(2)} TM) desde ${finalFilesMeta.length} ${
+          finalFilesMeta.length === 1 ? 'archivo' : 'archivos'
+        }.`,
+      });
+    }
+  };
+
+  // Cumulative Excel File Upload Handler with Automatic Pre-State Validation
   const handleUploadFiles = async (fileList: FileList) => {
     setIsUploading(true);
     setUploadFeedback(null);
 
-    const newRecordsBatch: FisheryRecord[] = [];
-    const newFilesBatch: UploadedFileMeta[] = [];
+    const allValidatedItems: ValidatedRecordItem[] = [];
+    const pendingFilesBatch: UploadedFileMeta[] = [];
+    let totalEmptySkipped = 0;
+    let totalSummarySkipped = 0;
 
     try {
       for (let i = 0; i < fileList.length; i++) {
@@ -110,7 +196,7 @@ export default function App() {
           uploadedFiles.filter((f) =>
             f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))
           ).length +
-          newFilesBatch.filter((f) =>
+          pendingFilesBatch.filter((f) =>
             f.name.startsWith(file.name.replace(/\.[^/.]+$/, ''))
           ).length;
 
@@ -122,29 +208,23 @@ export default function App() {
             : file.name;
 
         const parsed = parseExcelBuffer(buffer, effectiveFileName);
+        totalEmptySkipped += parsed.emptyRowsSkipped;
+        totalSummarySkipped += parsed.summaryRowsSkipped;
 
-        if (parsed.records.length > 0) {
-          const fileToneladas = parsed.records.reduce(
-            (sum, r) => sum + r.toneladas,
-            0
-          );
-          const fileKilogramos = parsed.records.reduce(
-            (sum, r) => sum + r.kilogramos,
-            0
-          );
+        if (parsed.validatedItems.length > 0) {
           const nowStr = new Date().toLocaleTimeString('es-VE', {
             hour: '2-digit',
             minute: '2-digit',
           });
 
-          newRecordsBatch.push(...parsed.records);
-          newFilesBatch.push({
+          allValidatedItems.push(...parsed.validatedItems);
+          pendingFilesBatch.push({
             id: `file-${Date.now()}-${i}`,
             name: effectiveFileName,
             uploadedAt: nowStr,
             recordCount: parsed.records.length,
-            totalToneladas: +fileToneladas.toFixed(3),
-            totalKilogramos: +fileKilogramos.toFixed(2),
+            totalToneladas: 0,
+            totalKilogramos: 0,
             sizeKB: Math.max(1, Math.round(file.size / 1024)),
             columns: parsed.columns,
             numericColumns: parsed.numericColumns,
@@ -154,27 +234,31 @@ export default function App() {
         }
       }
 
-      if (newRecordsBatch.length === 0) {
+      if (allValidatedItems.length === 0) {
         setUploadFeedback({
           type: 'error',
           message:
             'No se encontraron filas válidas en el archivo seleccionado. Verifica que contenga una tabla con encabezados y registros.',
         });
       } else {
-        setUploadedRecords((prev) => [...prev, ...newRecordsBatch]);
-        setUploadedFiles((prev) => [...prev, ...newFilesBatch]);
+        const summary = buildBatchValidationSummary(
+          allValidatedItems,
+          pendingFilesBatch,
+          totalEmptySkipped,
+          totalSummarySkipped
+        );
 
-        const addedKg = newRecordsBatch.reduce((s, r) => s + r.kilogramos, 0);
-        const addedTons = newRecordsBatch.reduce((s, r) => s + r.toneladas, 0);
-        setUploadFeedback({
-          type: 'success',
-          message: `Se cargaron ${newRecordsBatch.length} registros exactos (${addedKg.toLocaleString(
-            'es-VE',
-            { maximumFractionDigits: 2 }
-          )} Kg · ${addedTons.toFixed(2)} TM) desde ${newFilesBatch.length} ${
-            newFilesBatch.length === 1 ? 'archivo' : 'archivos'
-          }.`,
-        });
+        // If any incomplete fields, missing dates, negative values, or text-in-numeric cells are detected,
+        // report them automatically BEFORE adding records to global state.
+        if (summary.itemsWithIssues.length > 0) {
+          setPendingValidation(summary);
+          setUploadFeedback({
+            type: summary.errorCount > 0 ? 'error' : 'warning',
+            message: `Validación previa: se detectaron ${summary.itemsWithIssues.length} filas con datos incompletos o inconsistencias (${summary.errorCount} errores críticos, ${summary.warningOnlyCount} incompletas). Revisa el reporte para confirmar la carga.`,
+          });
+        } else {
+          commitValidatedBatch(summary.cleanRecords, pendingFilesBatch, summary);
+        }
       }
     } catch {
       setUploadFeedback({
@@ -187,12 +271,31 @@ export default function App() {
     }
   };
 
-  // Save a manual record or edit an existing row
+  // Save a manual record or edit an existing row (with pre-state validation)
   const handleSaveManualRecord = (
     data: Omit<FisheryRecord, 'id' | 'archivoOrigen' | 'kilogramos'>,
     existingId?: string
   ) => {
     const kilogramos = +(data.toneladas * 1000).toFixed(2);
+    const candidate: FisheryRecord = {
+      ...data,
+      kilogramos,
+      id: existingId || `manual-${Date.now()}`,
+      archivoOrigen: 'Registro Manual',
+    };
+
+    const issues = validateFisheryRecord(candidate);
+    const blockingErrors = issues.filter((i) => i.severity === 'error');
+    if (blockingErrors.length > 0) {
+      setUploadFeedback({
+        type: 'error',
+        message: `Registro rechazado: ${blockingErrors
+          .map((e) => e.message)
+          .join(' ')}`,
+      });
+      return;
+    }
+
     if (existingId) {
       setUploadedRecords((prev) =>
         prev.map((rec) =>
@@ -224,10 +327,7 @@ export default function App() {
       });
     } else {
       const newRec: FisheryRecord = {
-        ...data,
-        kilogramos,
-        id: `manual-${Date.now()}`,
-        archivoOrigen: 'Registro Manual',
+        ...candidate,
         rawFields: {
           Fecha: data.fecha,
           Municipio: data.municipio,
@@ -332,6 +432,35 @@ export default function App() {
           uploadFeedback={uploadFeedback}
         />
       )}
+
+      {/* Pre-State Automatic Data Validation Report Modal */}
+      <ValidationReportModal
+        summary={pendingValidation}
+        onCancel={() => {
+          setPendingValidation(null);
+          setUploadFeedback({
+            type: 'warning',
+            message:
+              'Carga cancelada. Ningún registro con inconsistencias fue agregado al estado global.',
+          });
+        }}
+        onCommitCleanOnly={() => {
+          if (!pendingValidation) return;
+          commitValidatedBatch(
+            pendingValidation.cleanRecords,
+            pendingValidation.pendingFilesMeta,
+            pendingValidation
+          );
+        }}
+        onCommitWithoutErrors={() => {
+          if (!pendingValidation) return;
+          commitValidatedBatch(
+            pendingValidation.safeRecordsWithoutErrors,
+            pendingValidation.pendingFilesMeta,
+            pendingValidation
+          );
+        }}
+      />
 
       {/* Cintillo Inferior Global (Sticky Footer Always Visible) */}
       <StickyFooter />

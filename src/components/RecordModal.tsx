@@ -64,7 +64,10 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     'Feria Soberana Municipal'
   );
 
+  const [formError, setFormError] = useState<string | null>(null);
+
   useEffect(() => {
+    setFormError(null);
     if (initialRecord) {
       setFecha(initialRecord.fecha);
       setEspecie(initialRecord.especie);
@@ -92,11 +95,28 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedTons = Math.max(0.05, parseFloat(toneladas) || 1);
-    const parsedFamilias = Math.max(
-      0,
-      parseInt(familiasBeneficiadas, 10) || 0
-    );
+    setFormError(null);
+
+    if (!fecha.trim()) {
+      setFormError('Debes indicar una fecha válida para la jornada.');
+      return;
+    }
+
+    const parsedTons = Number(toneladas);
+    if (!Number.isFinite(parsedTons) || parsedTons <= 0) {
+      setFormError(
+        'El volumen en toneladas debe ser un valor numérico positivo mayor a 0.'
+      );
+      return;
+    }
+
+    const parsedFamilias = Number(familiasBeneficiadas);
+    if (!Number.isFinite(parsedFamilias) || parsedFamilias < 0) {
+      setFormError(
+        'Las familias beneficiadas deben ser un número entero igual o mayor a 0.'
+      );
+      return;
+    }
 
     onSave(
       {
@@ -106,8 +126,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         parroquia: parroquia.trim() || `Casco Central ${municipio}`,
         comuna: comuna.trim() || '-',
         tipoPesca,
-        toneladas: +parsedTons.toFixed(2),
-        familiasBeneficiadas: parsedFamilias,
+        toneladas: +parsedTons.toFixed(4),
+        familiasBeneficiadas: Math.round(parsedFamilias),
         puntoDistribucion:
           puntoDistribucion.trim() || `Jornada Soberana ${municipio}`,
       },
@@ -145,6 +165,14 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-rose-800 font-medium"
+            >
+              {formError}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">

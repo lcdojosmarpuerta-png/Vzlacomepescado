@@ -1,5 +1,12 @@
 import * as XLSX from 'xlsx';
-import { FisheryRecord } from '../types/fishery';
+import {
+  BatchValidationSummary,
+  FisheryRecord,
+  RecordValidationIssue,
+  UploadedFileMeta,
+  ValidatedRecordItem,
+  ValidationIssueCode,
+} from '../types/fishery';
 
 /**
  * Normalizes strings for flexible Excel header matching (lowercase, no accents, alphanumeric only)
@@ -62,10 +69,20 @@ export function isBlankIndicatorValue(val: string | undefined | null): boolean {
 }
 
 /**
- * Verifies a record contains at least one non-blank meaningful field or positive numeric metric
+ * Verifies a record contains valid non-negative metrics and at least one non-blank meaningful field or positive numeric metric
  */
 export function isValidFisheryRecord(rec: FisheryRecord): boolean {
   if (!rec) return false;
+  if (
+    !Number.isFinite(rec.toneladas) ||
+    rec.toneladas < 0 ||
+    !Number.isFinite(rec.kilogramos ?? 0) ||
+    (rec.kilogramos ?? 0) < 0 ||
+    !Number.isFinite(rec.familiasBeneficiadas) ||
+    rec.familiasBeneficiadas < 0
+  ) {
+    return false;
+  }
   if (
     rec.toneladas > 0 ||
     (rec.kilogramos ?? 0) > 0 ||
@@ -144,7 +161,8 @@ export function normalizeMunicipioBarinas(raw: string): string {
 }
 
 /**
- * Parses numbers accurately across Spanish (1.250,50) and English (1,250.50) formats
+ * Parses numbers accurately across Spanish (1.250,50) and English (1,250.50) formats.
+ * Rejects cells containing unexpected text (e.g. "cuatro", "10 cajas", "N/A", dates).
  */
 export function parseLocaleNumber(val: unknown): number | null {
   if (val === null || val === undefined || val === '') return null;
@@ -152,19 +170,29 @@ export function parseLocaleNumber(val: unknown): number | null {
     return Number.isFinite(val) ? val : null;
   }
 
-  let str = String(val).trim();
-  if (!str) return null;
+  let str = cleanCellText(val);
+  if (!str || isBlankIndicatorValue(str)) return null;
 
-  // Strip currency symbols, unit suffixes, and spaces
+  // Strip valid leading currency symbols and trailing unit/currency suffixes
   str = str
-    .replace(/^(bs\.?|ves|usd|\$)/i, '')
-    .replace(/(kg|kilos|kilogramos|tm|toneladas|ton|bs\.?|usd|\$)$/i, '')
+    .replace(/^(bs\.?|ves|usd|\$)\s*/i, '')
+    .replace(/\s*(kg|kilos|kilogramos|tm|toneladas|tonelada|ton|bs\.?|usd|\$)$/i, '')
     .replace(/\s+/g, '')
     .trim();
 
-  // Keep only digits, dots, commas, and leading minus
-  str = str.replace(/[^0-9.,-]/g, '');
-  if (!str || str === '-' || str === '.' || str === ',') return null;
+  if (!str) return null;
+
+  // Reject if any alphabetic or invalid non-numeric characters remain (e.g. "10cajas", "cuatro", "error")
+  if (/[^0-9.,-]/.test(str)) {
+    return null;
+  }
+
+  // Reject malformed minus placement (only single leading '-' allowed)
+  if ((str.match(/-/g) || []).length > 1 || (str.includes('-') && !str.startsWith('-'))) {
+    return null;
+  }
+
+  if (str === '-' || str === '.' || str === ',' || str === '-.') return null;
 
   const hasComma = str.includes(',');
   const hasDot = str.includes('.');
@@ -186,9 +214,7 @@ export function parseLocaleNumber(val: unknown): number | null {
       str = str.replace(/,/g, '');
     } else {
       const decimals = parts[1] ?? '';
-      // If exactly 3 digits after comma and integer part != 0 (e.g. "4,500"), treat as thousands unless small decimal?
-      // Actually in Spanish Excel strings, comma is usually decimal unless 3 digits with >0 int part like "1,500"
-      if (decimals.length === 3 && parts[0] !== '0' && parts[0].length <= 3) {
+      if (decimals.length === 3 && parts[0] !== '0' && parts[0].replace('-', '').length <= 3) {
         str = str.replace(/,/g, '');
       } else {
         str = str.replace(',', '.');
@@ -200,11 +226,31 @@ export function parseLocaleNumber(val: unknown): number | null {
       // Multiple dots = thousands separators: 1.234.567
       str = str.replace(/\./g, '');
     }
-    // Single dot: keep as decimal separator (standard float), e.g., 4.5 or 1.250
   }
 
   const parsed = Number(str);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Validates that a YYYY-MM-DD string represents an actual calendar date
+ */
+export function isValidIsoDate(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1950 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return (
+    dt.getUTCFullYear() === year &&
+    dt.getUTCMonth() + 1 === month &&
+    dt.getUTCDate() === day
+  );
 }
 
 /**
@@ -214,7 +260,8 @@ function parseExcelDate(val: unknown): string {
   if (val === null || val === undefined || val === '') return '';
 
   if (val instanceof Date && !isNaN(val.getTime())) {
-    return val.toISOString().slice(0, 10);
+    const iso = val.toISOString().slice(0, 10);
+    return isValidIsoDate(iso) ? iso : '';
   }
 
   if (typeof val === 'number' && val > 20000 && val < 80000) {
@@ -224,17 +271,19 @@ function parseExcelDate(val: unknown): string {
       const y = String(parsedCode.y).padStart(4, '0');
       const m = String(parsedCode.m).padStart(2, '0');
       const d = String(parsedCode.d).padStart(2, '0');
-      return `${y}-${m}-${d}`;
+      const iso = `${y}-${m}-${d}`;
+      return isValidIsoDate(iso) ? iso : '';
     }
     const utcDays = Math.floor(val - 25569);
     const dateInfo = new Date(utcDays * 86400 * 1000);
     if (!isNaN(dateInfo.getTime())) {
-      return dateInfo.toISOString().slice(0, 10);
+      const iso = dateInfo.toISOString().slice(0, 10);
+      return isValidIsoDate(iso) ? iso : '';
     }
   }
 
-  const str = String(val).trim();
-  if (!str) return '';
+  const str = cleanCellText(val);
+  if (!str || isBlankIndicatorValue(str)) return '';
 
   // Match DD/MM/YYYY or DD-MM-YYYY
   const dmyMatch = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
@@ -244,19 +293,21 @@ function parseExcelDate(val: unknown): string {
     const yearStr =
       dmyMatch[3].length === 2 ? `20${dmyMatch[3]}` : dmyMatch[3];
     // Handle MM/DD/YYYY if month > 12
-    if (month > 12 && day <= 12) {
-      return `${yearStr}-${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}`;
-    }
-    return `${yearStr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const candidate =
+      month > 12 && day <= 12
+        ? `${yearStr}-${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}`
+        : `${yearStr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return isValidIsoDate(candidate) ? candidate : '';
   }
 
   // Match YYYY-MM-DD (optionally with time)
-  const ymdMatch = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  const ymdMatch = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[T\s].*)?$/);
   if (ymdMatch) {
-    return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
+    const candidate = `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
+    return isValidIsoDate(candidate) ? candidate : '';
   }
 
-  return str;
+  return '';
 }
 
 interface ColInfo {
@@ -301,6 +352,9 @@ function findColumnIndex(
 
 export interface ParsedExcelResult {
   records: FisheryRecord[];
+  validatedItems: ValidatedRecordItem[];
+  emptyRowsSkipped: number;
+  summaryRowsSkipped: number;
   columns: string[];
   numericColumns: string[];
   detectedWeightColumn?: string;
@@ -344,6 +398,9 @@ export function parseExcelBuffer(
   if (!targetSheet || bestMatrix.length === 0) {
     return {
       records: [],
+      validatedItems: [],
+      emptyRowsSkipped: 0,
+      summaryRowsSkipped: 0,
       columns: [],
       numericColumns: [],
       detectedWeightUnit: 'none',
@@ -423,6 +480,9 @@ export function parseExcelBuffer(
   if (colIndexMap.length === 0) {
     return {
       records: [],
+      validatedItems: [],
+      emptyRowsSkipped: 0,
+      summaryRowsSkipped: 0,
       columns: [],
       numericColumns: [],
       detectedWeightUnit: 'none',
@@ -574,7 +634,21 @@ export function parseExcelBuffer(
   const numericColumnCounts = new Map<string, { numeric: number; nonEmpty: number }>();
   colIndexMap.forEach((c) => numericColumnCounts.set(c.name, { numeric: 0, nonEmpty: 0 }));
 
-  const records: FisheryRecord[] = [];
+  interface CandidateRowEntry {
+    record: FisheryRecord;
+    rowNumber: number;
+    rawFechaCell: string;
+    rawCellsByColName: Record<string, string>;
+    rawValuesByColName: Record<string, unknown>;
+    tmVal: number | null;
+    kgVal: number | null;
+    genericVal: number | null;
+    famVal: number | null;
+  }
+
+  const candidateEntries: CandidateRowEntry[] = [];
+  let emptyRowsSkipped = 0;
+  let summaryRowsSkipped = 0;
   const timestampSeed = Date.now();
 
   const summaryRowKeywords = new Set([
@@ -616,7 +690,13 @@ export function parseExcelBuffer(
       const cleaned = cleanCellText(row[c.index]);
       return cleaned !== '' && cleaned !== '-';
     }).length;
-    if (meaningfulNonEmptyCount === 0) continue;
+    if (meaningfulNonEmptyCount === 0) {
+      const hasAnyCellAtAll = colIndexMap.some(
+        (c) => cleanCellText(row[c.index]) !== ''
+      );
+      if (hasAnyCellAtAll) emptyRowsSkipped++;
+      continue;
+    }
 
     // Skip summary/total rows (check first 4 columns so merged/indented TOTAL rows are caught)
     let isSummaryRow = false;
@@ -631,18 +711,28 @@ export function parseExcelBuffer(
         break;
       }
     }
-    if (isSummaryRow) continue;
+    if (isSummaryRow) {
+      summaryRowsSkipped++;
+      continue;
+    }
 
     const rawFields: Record<string, string> = {};
     const numericFields: Record<string, number> = {};
+    const rawCellsByColName: Record<string, string> = {};
+    const rawValuesByColName: Record<string, unknown> = {};
 
     colIndexMap.forEach((c) => {
       const cellVal = row[c.index];
-      let strVal = cleanCellText(cellVal);
+      const cleanedRaw = cleanCellText(cellVal);
+      rawCellsByColName[c.name] = cleanedRaw;
+      rawValuesByColName[c.name] = cellVal;
+
+      let strVal = cleanedRaw;
 
       // Format Excel serial dates ONLY for actual date columns
       if (colFecha && c.index === colFecha.index && strVal !== '') {
-        strVal = parseExcelDate(cellVal);
+        const parsedFecha = parseExcelDate(cellVal);
+        strVal = parsedFecha || cleanedRaw;
       }
 
       rawFields[c.name] = strVal;
@@ -684,14 +774,13 @@ export function parseExcelBuffer(
     }
 
     // Parse familias ONLY if the Excel has a families/beneficiaries column (never fabricate)
+    const famVal = colFamilias ? parseLocaleNumber(row[colFamilias.index]) : null;
     let familias = 0;
-    if (colFamilias) {
-      const famVal = parseLocaleNumber(row[colFamilias.index]);
-      if (famVal !== null && famVal >= 0) {
-        familias = Math.round(famVal);
-      }
+    if (famVal !== null) {
+      familias = Math.round(famVal);
     }
 
+    const rawFechaCell = colFecha ? cleanCellText(row[colFecha.index]) : '';
     const fecha = colFecha ? parseExcelDate(row[colFecha.index]) : '';
 
     const rawEsp = colEspecie ? cleanCellText(rawFields[colEspecie.name]) : '';
@@ -743,10 +832,17 @@ export function parseExcelBuffer(
       numericFields,
     };
 
-    // Final guard: never push rows that carry only blank/whitespace placeholders
-    if (!isValidFisheryRecord(candidateRecord)) continue;
-
-    records.push(candidateRecord);
+    candidateEntries.push({
+      record: candidateRecord,
+      rowNumber: r + 1, // 1-indexed spreadsheet row number
+      rawFechaCell,
+      rawCellsByColName,
+      rawValuesByColName,
+      tmVal,
+      kgVal,
+      genericVal,
+      famVal,
+    });
   }
 
   // Identify columns that are genuinely numeric (>= 60% numeric rows)
@@ -757,6 +853,269 @@ export function parseExcelBuffer(
     })
     .map((c) => c.name);
 
+  // Build strict set of columns expected to contain numeric values (for text-in-numeric detection)
+  const expectedNumericHeaderTokens = new Set([
+    'kg',
+    'kilo',
+    'kilos',
+    'kilogramo',
+    'kilogramos',
+    'tm',
+    'ton',
+    'tonelada',
+    'toneladas',
+    'familia',
+    'familias',
+    'beneficiario',
+    'beneficiarios',
+    'hogar',
+    'hogares',
+    'cantidad',
+    'peso',
+    'volumen',
+    'precio',
+    'monto',
+    'subtotal',
+    'total',
+    'bs',
+    'usd',
+  ]);
+  const nonNumericModifierTokens = new Set([
+    'unidad',
+    'tipo',
+    'modalidad',
+    'observacion',
+    'observaciones',
+    'comentario',
+    'comentarios',
+    'nota',
+    'notas',
+    'descripcion',
+    'fecha',
+    'cedula',
+    'telefono',
+    'codigo',
+    'nro',
+    'numero',
+    'id',
+  ]);
+
+  const expectedNumericColNames = new Set<string>(numericColumns);
+  [colTm, colKg, colGenericWeight, colFamilias].forEach((c) => {
+    if (c) expectedNumericColNames.add(c.name);
+  });
+  colIndexMap.forEach((c) => {
+    if (colFecha && c.index === colFecha.index) return;
+    if (
+      c.tokens.some((t) => expectedNumericHeaderTokens.has(t)) &&
+      !c.tokens.some((t) => nonNumericModifierTokens.has(t))
+    ) {
+      expectedNumericColNames.add(c.name);
+    }
+  });
+
+  // Remove date/identifier columns even if mostly numeric (e.g. Nro, Item, Año, Cedula)
+  const idOrCodeTokens = new Set([
+    'nro',
+    'no',
+    'num',
+    'numero',
+    'item',
+    'id',
+    'codigo',
+    'cedula',
+    'telefono',
+    'correlativo',
+    'indice',
+    'fecha',
+    'ano',
+    'mes',
+    'dia',
+  ]);
+  colIndexMap.forEach((c) => {
+    if (
+      c.name === '#' ||
+      (c.tokens.length > 0 && c.tokens.every((t) => idOrCodeTokens.has(t))) ||
+      c.tokens.includes('cedula') ||
+      c.tokens.includes('telefono') ||
+      c.tokens.includes('codigo')
+    ) {
+      expectedNumericColNames.delete(c.name);
+    }
+  });
+
+  const validatedItems: ValidatedRecordItem[] = [];
+  const validRecords: FisheryRecord[] = [];
+  const hasWeightColumn = Boolean(colTm || colKg || colGenericWeight);
+
+  for (const entry of candidateEntries) {
+    const { record, rowNumber, rawFechaCell, rawCellsByColName, rawValuesByColName, tmVal, kgVal, genericVal, famVal } =
+      entry;
+    const issues: RecordValidationIssue[] = [];
+    const flaggedNegativeCols = new Set<string>();
+    const flaggedTextNumericCols = new Set<string>();
+
+    // 1. Validate Date
+    if (colFecha) {
+      if (!rawFechaCell || isBlankIndicatorValue(rawFechaCell)) {
+        issues.push({
+          code: 'missing_date',
+          severity: 'warning',
+          field: colFecha.name,
+          rawValue: rawFechaCell || '(vacío)',
+          message: `Registro sin fecha en columna "${colFecha.name}".`,
+        });
+      } else if (!isValidIsoDate(record.fecha)) {
+        issues.push({
+          code: 'invalid_date',
+          severity: 'warning',
+          field: colFecha.name,
+          rawValue: rawFechaCell,
+          message: `Fecha con formato inválido o inexistente ("${rawFechaCell}").`,
+        });
+      }
+    } else {
+      issues.push({
+        code: 'missing_date',
+        severity: 'warning',
+        field: 'Fecha',
+        rawValue: '(sin columna)',
+        message: 'El archivo no posee columna de fecha; registro sin fecha.',
+      });
+    }
+
+    // 2. Validate Negative Toneladas / Kilogramos / Familias
+    if (tmVal !== null && tmVal < 0) {
+      const colName = colTm?.name || 'Toneladas (TM)';
+      flaggedNegativeCols.add(colName);
+      issues.push({
+        code: 'negative_toneladas',
+        severity: 'error',
+        field: colName,
+        rawValue: rawCellsByColName[colName] || String(tmVal),
+        message: `Toneladas negativas (${tmVal} TM) en "${colName}".`,
+      });
+    }
+    if (kgVal !== null && kgVal < 0) {
+      const colName = colKg?.name || 'Kilogramos (Kg)';
+      flaggedNegativeCols.add(colName);
+      issues.push({
+        code: 'negative_kilogramos',
+        severity: 'error',
+        field: colName,
+        rawValue: rawCellsByColName[colName] || String(kgVal),
+        message: `Kilogramos negativos (${kgVal} Kg) en "${colName}".`,
+      });
+    }
+    if (genericVal !== null && genericVal < 0 && !colKg && !colTm) {
+      const colName = colGenericWeight?.name || 'Peso / Cantidad';
+      flaggedNegativeCols.add(colName);
+      issues.push({
+        code: 'negative_kilogramos',
+        severity: 'error',
+        field: colName,
+        rawValue: rawCellsByColName[colName] || String(genericVal),
+        message: `Volumen negativo (${genericVal}) en "${colName}".`,
+      });
+    }
+    if (colFamilias && famVal !== null && famVal < 0) {
+      flaggedNegativeCols.add(colFamilias.name);
+      issues.push({
+        code: 'negative_families',
+        severity: 'error',
+        field: colFamilias.name,
+        rawValue: rawCellsByColName[colFamilias.name] || String(famVal),
+        message: `Familias beneficiadas negativas (${famVal}) en "${colFamilias.name}".`,
+      });
+    }
+
+    // 3. Validate Text in Numeric Fields & Other Negative Numeric Columns
+    expectedNumericColNames.forEach((colName) => {
+      const rawText = rawCellsByColName[colName] ?? '';
+      const rawVal = rawValuesByColName[colName];
+      if (!rawText) return;
+
+      const parsed = parseLocaleNumber(rawVal);
+      if (parsed === null) {
+        flaggedTextNumericCols.add(colName);
+        issues.push({
+          code: 'text_in_numeric_field',
+          severity: 'error',
+          field: colName,
+          rawValue: rawText,
+          message: `Valor de texto ("${rawText}") en campo numérico "${colName}".`,
+        });
+      } else if (parsed < 0 && !flaggedNegativeCols.has(colName)) {
+        flaggedNegativeCols.add(colName);
+        issues.push({
+          code: 'negative_numeric',
+          severity: 'error',
+          field: colName,
+          rawValue: rawText,
+          message: `Valor negativo (${rawText}) en campo numérico "${colName}".`,
+        });
+      }
+    });
+
+    // 4. Validate Zero Weight (only if weight columns didn't already trigger text/negative error)
+    if (hasWeightColumn && record.toneladas === 0 && record.kilogramos === 0) {
+      const weightColNames = [colTm?.name, colKg?.name, colGenericWeight?.name].filter(
+        Boolean
+      ) as string[];
+      const alreadyFlaggedWeight = weightColNames.some(
+        (n) => flaggedTextNumericCols.has(n) || flaggedNegativeCols.has(n)
+      );
+      if (!alreadyFlaggedWeight) {
+        issues.push({
+          code: 'zero_weight',
+          severity: 'warning',
+          field: colKg?.name || colTm?.name || colGenericWeight?.name || 'Peso',
+          rawValue: '0',
+          message: 'Peso total en cero (0 Kg / 0 TM) o celda de peso vacía.',
+        });
+      }
+    }
+
+    // 5. Validate Incomplete Territory & Species
+    if (isBlankIndicatorValue(record.municipio)) {
+      issues.push({
+        code: 'missing_municipio',
+        severity: 'warning',
+        field: colMunicipio?.name || 'Municipio',
+        rawValue: colMunicipio ? rawCellsByColName[colMunicipio.name] || '(vacío)' : '(sin columna)',
+        message: 'Registro sin municipio especificado.',
+      });
+    }
+
+    if (isBlankIndicatorValue(record.especie)) {
+      issues.push({
+        code: 'missing_especie',
+        severity: 'warning',
+        field: colEspecie?.name || 'Especie',
+        rawValue: colEspecie ? rawCellsByColName[colEspecie.name] || '(vacío)' : '(sin columna)',
+        message: 'Registro sin especie especificada.',
+      });
+    }
+
+    const hasErrors = issues.some((i) => i.severity === 'error');
+    const hasWarnings = issues.some((i) => i.severity === 'warning');
+
+    // Clamp negative numbers out of validRecords so corrupt weights never enter clean state
+    const canEnterSafePool = !hasErrors && isValidFisheryRecord(record);
+    if (canEnterSafePool) {
+      validRecords.push(record);
+    }
+
+    validatedItems.push({
+      record,
+      rowNumber,
+      fileName,
+      issues,
+      hasErrors,
+      hasWarnings,
+    });
+  }
+
   const detectedWeightColumn =
     colKg?.name || colTm?.name || colGenericWeight?.name;
   const detectedWeightUnit: 'kg' | 'tm' | 'none' = colKg || colGenericWeight
@@ -766,12 +1125,183 @@ export function parseExcelBuffer(
     : 'none';
 
   return {
-    records,
+    records: validRecords,
+    validatedItems,
+    emptyRowsSkipped,
+    summaryRowsSkipped,
     columns,
     numericColumns,
     detectedWeightColumn,
     detectedWeightUnit,
   };
+}
+
+/**
+ * Validates an individual FisheryRecord (for manual entries or storage checks)
+ */
+export function validateFisheryRecord(
+  rec: FisheryRecord
+): RecordValidationIssue[] {
+  const issues: RecordValidationIssue[] = [];
+  if (!rec.fecha || !isValidIsoDate(rec.fecha)) {
+    issues.push({
+      code: rec.fecha ? 'invalid_date' : 'missing_date',
+      severity: 'warning',
+      field: 'Fecha',
+      rawValue: rec.fecha || '(vacío)',
+      message: rec.fecha
+        ? `Fecha con formato inválido ("${rec.fecha}").`
+        : 'Registro sin fecha asignada.',
+    });
+  }
+  if (!Number.isFinite(rec.toneladas) || rec.toneladas < 0) {
+    issues.push({
+      code: 'negative_toneladas',
+      severity: 'error',
+      field: 'Toneladas (TM)',
+      rawValue: String(rec.toneladas),
+      message: `Toneladas inválidas o negativas (${rec.toneladas} TM).`,
+    });
+  }
+  if (!Number.isFinite(rec.kilogramos) || rec.kilogramos < 0) {
+    issues.push({
+      code: 'negative_kilogramos',
+      severity: 'error',
+      field: 'Kilogramos (Kg)',
+      rawValue: String(rec.kilogramos),
+      message: `Kilogramos inválidos o negativos (${rec.kilogramos} Kg).`,
+    });
+  }
+  if (!Number.isFinite(rec.familiasBeneficiadas) || rec.familiasBeneficiadas < 0) {
+    issues.push({
+      code: 'negative_families',
+      severity: 'error',
+      field: 'Familias Beneficiadas',
+      rawValue: String(rec.familiasBeneficiadas),
+      message: `Familias beneficiadas inválidas o negativas (${rec.familiasBeneficiadas}).`,
+    });
+  }
+  if (isBlankIndicatorValue(rec.municipio)) {
+    issues.push({
+      code: 'missing_municipio',
+      severity: 'warning',
+      field: 'Municipio',
+      rawValue: rec.municipio || '(vacío)',
+      message: 'Registro sin municipio especificado.',
+    });
+  }
+  if (isBlankIndicatorValue(rec.especie)) {
+    issues.push({
+      code: 'missing_especie',
+      severity: 'warning',
+      field: 'Especie',
+      rawValue: rec.especie || '(vacío)',
+      message: 'Registro sin especie especificada.',
+    });
+  }
+  return issues;
+}
+
+/**
+ * Aggregates validation findings across one or more uploaded Excel files
+ * before adding records to global state.
+ */
+export function buildBatchValidationSummary(
+  items: ValidatedRecordItem[],
+  pendingFilesMeta: UploadedFileMeta[],
+  emptyRowsSkipped: number,
+  summaryRowsSkipped: number
+): BatchValidationSummary {
+  const issueCounts: Record<ValidationIssueCode, number> = {
+    missing_date: 0,
+    invalid_date: 0,
+    negative_toneladas: 0,
+    negative_kilogramos: 0,
+    negative_families: 0,
+    negative_numeric: 0,
+    text_in_numeric_field: 0,
+    missing_municipio: 0,
+    missing_especie: 0,
+    zero_weight: 0,
+  };
+
+  const cleanRecords: FisheryRecord[] = [];
+  const safeRecordsWithoutErrors: FisheryRecord[] = [];
+  const itemsWithIssues: ValidatedRecordItem[] = [];
+
+  let cleanCount = 0;
+  let warningOnlyCount = 0;
+  let errorCount = 0;
+
+  for (const item of items) {
+    item.issues.forEach((issue) => {
+      issueCounts[issue.code] = (issueCounts[issue.code] || 0) + 1;
+    });
+
+    if (item.hasErrors || item.hasWarnings) {
+      itemsWithIssues.push(item);
+    }
+
+    if (item.hasErrors) {
+      errorCount++;
+    } else if (item.hasWarnings) {
+      warningOnlyCount++;
+      if (isValidFisheryRecord(item.record)) {
+        safeRecordsWithoutErrors.push(item.record);
+      }
+    } else {
+      cleanCount++;
+      if (isValidFisheryRecord(item.record)) {
+        cleanRecords.push(item.record);
+        safeRecordsWithoutErrors.push(item.record);
+      }
+    }
+  }
+
+  return {
+    totalRowsEvaluated: items.length,
+    emptyRowsSkipped,
+    summaryRowsSkipped,
+    cleanCount,
+    warningOnlyCount,
+    errorCount,
+    issueCounts,
+    itemsWithIssues,
+    cleanRecords,
+    safeRecordsWithoutErrors,
+    pendingFilesMeta,
+  };
+}
+
+/**
+ * Exports detected validation issues to an Excel file for quick correction
+ */
+export function exportValidationReportToExcel(items: ValidatedRecordItem[]) {
+  const rows: Record<string, string | number>[] = [];
+
+  items.forEach((item) => {
+    item.issues.forEach((issue) => {
+      rows.push({
+        Archivo: item.fileName,
+        'Fila Excel': item.rowNumber,
+        Severidad: issue.severity === 'error' ? 'Error Crítico' : 'Dato Incompleto',
+        Campo: issue.field,
+        'Valor Detectado': issue.rawValue,
+        Observación: issue.message,
+        Municipio: item.record.municipio,
+        Especie: item.record.especie,
+        Fecha: item.record.fecha || '(Sin fecha)',
+      });
+    });
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Reporte_Validacion');
+  XLSX.writeFile(
+    workbook,
+    `Reporte_Validacion_Pesca_Barinas_${new Date().toISOString().slice(0, 10)}.xlsx`
+  );
 }
 
 /**

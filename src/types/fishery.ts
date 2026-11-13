@@ -45,3 +45,49 @@ export interface FilterState {
   /** Dynamic filters keyed by exact Excel column header name */
   customFields: Record<string, string>;
 }
+
+export type ValidationIssueCode =
+  | 'missing_date'
+  | 'invalid_date'
+  | 'negative_toneladas'
+  | 'negative_kilogramos'
+  | 'negative_families'
+  | 'negative_numeric'
+  | 'text_in_numeric_field'
+  | 'missing_municipio'
+  | 'missing_especie'
+  | 'zero_weight';
+
+export type ValidationSeverity = 'error' | 'warning';
+
+export interface RecordValidationIssue {
+  code: ValidationIssueCode;
+  severity: ValidationSeverity;
+  field: string;
+  rawValue: string;
+  message: string;
+}
+
+export interface ValidatedRecordItem {
+  record: FisheryRecord;
+  rowNumber: number;
+  fileName: string;
+  issues: RecordValidationIssue[];
+  hasErrors: boolean;
+  hasWarnings: boolean;
+}
+
+export interface BatchValidationSummary {
+  totalRowsEvaluated: number;
+  emptyRowsSkipped: number;
+  summaryRowsSkipped: number;
+  cleanCount: number;
+  warningOnlyCount: number;
+  errorCount: number;
+  issueCounts: Record<ValidationIssueCode, number>;
+  itemsWithIssues: ValidatedRecordItem[];
+  cleanRecords: FisheryRecord[];
+  safeRecordsWithoutErrors: FisheryRecord[];
+  pendingFilesMeta: UploadedFileMeta[];
+}
+
