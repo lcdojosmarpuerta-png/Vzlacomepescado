@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { MapPin, CheckCircle2, Clock, AlertTriangle, RotateCcw } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
+import { normalizeMunicipioBarinas } from '../data/demoData';
 
 interface BarinasMapProps {
   records: FisheryRecord[];
@@ -132,20 +133,23 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
   const statsByMunicipio = useMemo(() => {
     const map = new Map<
       string,
-      { toneladas: number; familias: number; jornadas: number }
+      { toneladas: number; kilogramos: number; familias: number; jornadas: number }
     >();
     BARINAS_MUNICIPIOS.forEach((m) => {
-      map.set(m.name, { toneladas: 0, familias: 0, jornadas: 0 });
+      map.set(m.name, { toneladas: 0, kilogramos: 0, familias: 0, jornadas: 0 });
     });
 
     records.forEach((r) => {
-      const prev = map.get(r.municipio) || {
+      const canonical = normalizeMunicipioBarinas(r.municipio);
+      const prev = map.get(canonical) || {
         toneladas: 0,
+        kilogramos: 0,
         familias: 0,
         jornadas: 0,
       };
-      map.set(r.municipio, {
-        toneladas: +(prev.toneladas + r.toneladas).toFixed(2),
+      map.set(canonical, {
+        toneladas: prev.toneladas + r.toneladas,
+        kilogramos: prev.kilogramos + (r.kilogramos ?? r.toneladas * 1000),
         familias: prev.familias + r.familiasBeneficiadas,
         jornadas: prev.jornadas + 1,
       });
@@ -155,11 +159,11 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
   }, [records]);
 
   const maxTons = useMemo(() => {
-    let max = 1;
+    let max = 0;
     statsByMunicipio.forEach((v) => {
       if (v.toneladas > max) max = v.toneladas;
     });
-    return max;
+    return max > 0 ? max : 1;
   }, [statsByMunicipio]);
 
   // Goal per municipality (~1/12th of regional target)
@@ -179,12 +183,13 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
   };
 
   const activeMunName =
-    hoveredMun || (selectedMunicipio !== 'Todos' ? selectedMunicipio : 'Barinas');
+    hoveredMun || (selectedMunicipio !== 'Todos' ? normalizeMunicipioBarinas(selectedMunicipio) : 'Barinas');
   const activeMunShape =
     BARINAS_MUNICIPIOS.find((m) => m.name === activeMunName) ||
     BARINAS_MUNICIPIOS[6];
   const activeStats = statsByMunicipio.get(activeMunShape.name) || {
     toneladas: 0,
+    kilogramos: 0,
     familias: 0,
     jornadas: 0,
   };
@@ -193,6 +198,7 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
     return BARINAS_MUNICIPIOS.map((m) => {
       const st = statsByMunicipio.get(m.name) || {
         toneladas: 0,
+        kilogramos: 0,
         familias: 0,
         jornadas: 0,
       };
@@ -256,7 +262,7 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
               />
 
               {BARINAS_MUNICIPIOS.map((mun) => {
-                const isSelected = selectedMunicipio === mun.name;
+                const isSelected = normalizeMunicipioBarinas(selectedMunicipio) === mun.name;
                 const isHovered = hoveredMun === mun.name;
                 const fill = getFillColor(mun.name, isSelected, isHovered);
                 const textLight =
@@ -270,7 +276,7 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
                     key={mun.name}
                     onClick={() =>
                       onSelectMunicipio(
-                        selectedMunicipio === mun.name ? 'Todos' : mun.name
+                        isSelected ? 'Todos' : mun.name
                       )
                     }
                     onMouseEnter={() => setHoveredMun(mun.name)}
@@ -309,16 +315,16 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
                     (Cap. {activeMunShape.capital})
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-600 font-mono tabular-nums mt-0.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 font-mono tabular-nums mt-0.5">
                   <span className="font-bold text-cyan-800">
-                    {activeStats.toneladas.toFixed(2)} TM
+                    {activeStats.toneladas.toFixed(2)} TM ({Math.round(activeStats.kilogramos).toLocaleString('es-VE')} Kg)
                   </span>
                   <span aria-hidden="true">·</span>
                   <span>
                     {activeStats.familias.toLocaleString('es-VE')} familias
                   </span>
                   <span aria-hidden="true">·</span>
-                  <span>{activeStats.jornadas} jornadas</span>
+                  <span>{activeStats.jornadas} reg.</span>
                 </div>
               </div>
             </div>
@@ -348,9 +354,16 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
 
           <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
             {rankedList.map((item) => {
-              const isSelected = selectedMunicipio === item.name;
+              const isSelected = normalizeMunicipioBarinas(selectedMunicipio) === item.name;
               const status =
-                item.pctGoal >= 80
+                item.toneladas <= 0
+                  ? {
+                      label: 'Sin reg.',
+                      icon: Clock,
+                      textClass: 'text-slate-500',
+                      barClass: 'bg-slate-300',
+                    }
+                  : item.pctGoal >= 80
                   ? {
                       label: 'Óptimo',
                       icon: CheckCircle2,
@@ -404,7 +417,7 @@ export const BarinasMap: React.FC<BarinasMapProps> = ({
                   <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full ${status.barClass}`}
-                      style={{ width: `${Math.max(4, item.pctGoal)}%` }}
+                      style={{ width: `${item.toneladas > 0 ? Math.max(3, item.pctGoal) : 0}%` }}
                     />
                   </div>
                 </button>

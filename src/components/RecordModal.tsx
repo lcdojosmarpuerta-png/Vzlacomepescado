@@ -6,7 +6,10 @@ interface RecordModalProps {
   isOpen: boolean;
   initialRecord: FisheryRecord | null;
   onClose: () => void;
-  onSave: (record: Omit<FisheryRecord, 'id' | 'archivoOrigen'>, existingId?: string) => void;
+  onSave: (
+    record: Omit<FisheryRecord, 'id' | 'archivoOrigen' | 'kilogramos'>,
+    existingId?: string
+  ) => void;
 }
 
 const MUNICIPIOS_BARINAS = [

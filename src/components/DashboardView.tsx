@@ -48,6 +48,7 @@ import { ExecutiveReportModal } from './ExecutiveReportModal';
 import {
   downloadSampleExcelTemplate,
   exportRecordsToExcel,
+  normalizeMunicipioBarinas,
 } from '../data/demoData';
 
 interface DashboardViewProps {
@@ -58,7 +59,7 @@ interface DashboardViewProps {
   onRemoveSingleFile: (fileName: string) => void;
   onClearAllHistory: () => void;
   onSaveManualRecord: (
-    data: Omit<FisheryRecord, 'id' | 'archivoOrigen'>,
+    data: Omit<FisheryRecord, 'id' | 'archivoOrigen' | 'kilogramos'>,
     existingId?: string
   ) => void;
   onDeleteRecord: (id: string) => void;
@@ -108,9 +109,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   uploadFeedback,
 }) => {
   const [barChartMode, setBarChartMode] = useState<string>('especie');
-  const [donutMode, setDonutMode] = useState<'tipoPesca' | 'especie'>(
-    'tipoPesca'
-  );
+  const [donutMode, setDonutMode] = useState<string>('tipoPesca');
+  const [chartMetric, setChartMetric] = useState<string>('toneladas');
   const [sortField, setSortField] = useState<SortField>('fecha');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -158,6 +158,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(colSet);
   }, [uploadedFiles, records]);
 
+  const allNumericColumns = useMemo(() => {
+    const numSet = new Set<string>();
+    uploadedFiles.forEach((f) => {
+      f.numericColumns?.forEach((c) => numSet.add(c));
+    });
+    records.forEach((r) => {
+      if (r.numericFields) {
+        Object.keys(r.numericFields).forEach((k) => numSet.add(k));
+      }
+    });
+    return Array.from(numSet);
+  }, [uploadedFiles, records]);
+
   const dynamicExcelColumns = useMemo(() => {
     return allExcelColumnNames
       .map((column) => {
@@ -176,13 +189,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Apply dynamic filters (both standard and exact Excel column filters) + real-time search
   const filteredRecords = useMemo(() => {
+    const selectedMunNorm =
+      filters.municipio !== 'Todos'
+        ? normalizeMunicipioBarinas(filters.municipio)
+        : 'Todos';
+
     return records.filter((rec) => {
       if (filters.especie !== 'Todas' && rec.especie !== filters.especie) {
         return false;
       }
       if (
-        filters.municipio !== 'Todos' &&
-        rec.municipio !== filters.municipio
+        selectedMunNorm !== 'Todos' &&
+        normalizeMunicipioBarinas(rec.municipio) !== selectedMunNorm
       ) {
         return false;
       }
@@ -198,10 +216,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ) {
         return false;
       }
-      if (filters.fechaInicio && rec.fecha < filters.fechaInicio) {
+      if (filters.fechaInicio && (!rec.fecha || rec.fecha < filters.fechaInicio)) {
         return false;
       }
-      if (filters.fechaFin && rec.fecha > filters.fechaFin) {
+      if (filters.fechaFin && (!rec.fecha || rec.fecha > filters.fechaFin)) {
         return false;
       }
 
@@ -240,22 +258,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [records, filters]);
 
-  // Compute KPI Metrics (0 when no Excel uploaded)
+  const hasDateData = useMemo(
+    () => records.some((r) => Boolean(r.fecha && r.fecha.trim())),
+    [records]
+  );
+
+  // Compute exact KPI Metrics (0 when no Excel uploaded)
   const kpiMetrics = useMemo(() => {
     const totalToneladas = filteredRecords.reduce(
       (acc, r) => acc + r.toneladas,
       0
     );
-    const totalKilogramos = Math.round(totalToneladas * 1000);
-    const uniqueSpecies = new Set(filteredRecords.map((r) => r.especie)).size;
-    const uniqueMunicipios = new Set(filteredRecords.map((r) => r.municipio))
-      .size;
+    const totalKilogramos = filteredRecords.reduce(
+      (acc, r) => acc + (r.kilogramos ?? r.toneladas * 1000),
+      0
+    );
+
+    const speciesTotals = new Map<string, number>();
+    const validMunicipios = new Set<string>();
+
+    filteredRecords.forEach((r) => {
+      const esp = r.especie.trim();
+      if (esp && esp !== 'Sin Especificar' && esp !== 'No especificado') {
+        speciesTotals.set(esp, (speciesTotals.get(esp) || 0) + r.toneladas);
+      }
+      const mun = r.municipio.trim();
+      if (mun && mun !== 'No especificado' && mun !== 'Sin Especificar') {
+        validMunicipios.add(normalizeMunicipioBarinas(mun));
+      }
+    });
+
+    const topSpeciesEntry = Array.from(speciesTotals.entries()).sort(
+      (a, b) => b[1] - a[1]
+    )[0];
+
     const totalFamilias = filteredRecords.reduce(
       (acc, r) => acc + r.familiasBeneficiadas,
       0
     );
     const avgKgPerFamily =
-      totalFamilias > 0 ? +(totalKilogramos / totalFamilias).toFixed(2) : 0;
+      totalFamilias > 0 ? +(totalKilogramos / totalFamilias).toFixed(2) : null;
     const goalPct =
       regionalGoalTons > 0 && totalToneladas > 0
         ? Math.min(100, +((totalToneladas / regionalGoalTons) * 100).toFixed(1))
@@ -264,8 +306,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return {
       totalToneladas,
       totalKilogramos,
-      uniqueSpecies,
-      uniqueMunicipios,
+      uniqueSpecies: speciesTotals.size,
+      topSpeciesName: topSpeciesEntry?.[0] || null,
+      uniqueMunicipios: validMunicipios.size,
       totalJornadas: filteredRecords.length,
       totalFamilias,
       avgKgPerFamily,
@@ -273,11 +316,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [filteredRecords, regionalGoalTons]);
 
-  // 1. Bar Chart Data (supports grouping by Especie, Municipio, or any detected Excel column!)
+  const getMetricValue = (r: FisheryRecord, metric: string): number => {
+    if (metric === 'toneladas') return r.toneladas;
+    if (metric === 'kilogramos') return r.kilogramos ?? r.toneladas * 1000;
+    return r.numericFields?.[metric] ?? 0;
+  };
+
+  const formatMetricVal = (val: number, metric: string): string => {
+    if (metric === 'toneladas') {
+      return `${val.toLocaleString('es-VE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 3,
+      })} TM`;
+    }
+    if (metric === 'kilogramos') {
+      return `${val.toLocaleString('es-VE', {
+        maximumFractionDigits: 2,
+      })} Kg`;
+    }
+    return val.toLocaleString('es-VE', { maximumFractionDigits: 2 });
+  };
+
+  const activeMetricUnit =
+    chartMetric === 'toneladas'
+      ? ' TM'
+      : chartMetric === 'kilogramos'
+      ? ' Kg'
+      : '';
+
+  const activeMetricTitle =
+    chartMetric === 'toneladas'
+      ? 'Toneladas Métricas (TM)'
+      : chartMetric === 'kilogramos'
+      ? 'Kilogramos (Kg)'
+      : chartMetric;
+
+  // 1. Bar Chart Data (exact sum without premature per-row rounding)
   const barChartData = useMemo(() => {
     const map = new Map<
       string,
-      { name: string; toneladas: number; familias: number }
+      { name: string; value: number; toneladas: number; kilogramos: number; registros: number }
     >();
     filteredRecords.forEach((r) => {
       let key = '';
@@ -288,21 +366,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       } else {
         key = r.rawFields?.[barChartMode] || 'Sin Especificar';
       }
-      const existing = map.get(key) || { name: key, toneladas: 0, familias: 0 };
-      existing.toneladas = +(existing.toneladas + r.toneladas).toFixed(2);
-      existing.familias += r.familiasBeneficiadas;
+      const existing = map.get(key) || {
+        name: key,
+        value: 0,
+        toneladas: 0,
+        kilogramos: 0,
+        registros: 0,
+      };
+      existing.value += getMetricValue(r, chartMetric);
+      existing.toneladas += r.toneladas;
+      existing.kilogramos += r.kilogramos ?? r.toneladas * 1000;
+      existing.registros += 1;
       map.set(key, existing);
     });
-    return Array.from(map.values()).sort((a, b) => b.toneladas - a.toneladas);
-  }, [filteredRecords, barChartMode]);
+    return Array.from(map.values())
+      .map((item) => ({
+        ...item,
+        value: +item.value.toFixed(4),
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [filteredRecords, barChartMode, chartMetric]);
 
-  // 2. Temporal Evolution Data
+  // 2. Temporal Evolution Data (only records with valid dates)
   const timeSeriesData = useMemo(() => {
-    const map = new Map<
-      string,
-      { fecha: string; toneladas: number; acumulado: number }
-    >();
-    const sortedByDate = [...filteredRecords].sort((a, b) =>
+    const datedRecords = filteredRecords.filter(
+      (r) => r.fecha && r.fecha.trim() !== ''
+    );
+    const map = new Map<string, { fecha: string; value: number }>();
+    const sortedByDate = [...datedRecords].sort((a, b) =>
       a.fecha.localeCompare(b.fecha)
     );
 
@@ -310,34 +401,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const key = r.fecha;
       const existing = map.get(key) || {
         fecha: key,
-        toneladas: 0,
-        acumulado: 0,
+        value: 0,
       };
-      existing.toneladas = +(existing.toneladas + r.toneladas).toFixed(2);
+      existing.value += getMetricValue(r, chartMetric);
       map.set(key, existing);
     });
 
     let runningTotal = 0;
     return Array.from(map.values()).map((item) => {
-      runningTotal = +(runningTotal + item.toneladas).toFixed(2);
+      runningTotal += item.value;
       return {
-        ...item,
-        acumulado: runningTotal,
+        fecha: item.fecha,
+        valor: +item.value.toFixed(4),
+        acumulado: +runningTotal.toFixed(4),
       };
     });
-  }, [filteredRecords]);
+  }, [filteredRecords, chartMetric]);
 
-  // 3. Doughnut Distribution Data
+  // 3. Doughnut Distribution Data (supports modalidad, especie, municipio, or any Excel column)
   const donutChartData = useMemo(() => {
     const map = new Map<string, number>();
     filteredRecords.forEach((r) => {
-      const key = donutMode === 'tipoPesca' ? r.tipoPesca : r.especie;
-      map.set(key, +((map.get(key) || 0) + r.toneladas).toFixed(2));
+      let key = '';
+      if (donutMode === 'tipoPesca') {
+        key = r.tipoPesca;
+      } else if (donutMode === 'especie') {
+        key = r.especie;
+      } else if (donutMode === 'municipio') {
+        key = r.municipio;
+      } else {
+        key = r.rawFields?.[donutMode] || 'Sin Especificar';
+      }
+      map.set(key, (map.get(key) || 0) + getMetricValue(r, chartMetric));
     });
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, value]) => ({ name, value: +value.toFixed(4) }))
+      .filter((d) => d.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [filteredRecords, donutMode]);
+  }, [filteredRecords, donutMode, chartMetric]);
+
+  const donutTotal = useMemo(
+    () => donutChartData.reduce((sum, item) => sum + item.value, 0),
+    [donutChartData]
+  );
 
   // Sorted & Paginated Table Data
   const sortedTableRecords = useMemo(() => {
@@ -496,7 +602,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
                     <span>
-                      {kpiMetrics.totalKilogramos.toLocaleString('es-VE')} Kg
+                      {kpiMetrics.totalKilogramos.toLocaleString('es-VE', {
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      Kg
                     </span>
                     <span aria-hidden="true">·</span>
                     <span>Proteína distribuida</span>
@@ -515,7 +624,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 truncate">
                     <span>Líder:</span>
                     <span className="font-semibold text-slate-700 truncate">
-                      {barChartData[0]?.name || 'Sin datos (0)'}
+                      {kpiMetrics.topSpeciesName || 'Sin datos'}
                     </span>
                   </div>
                 </div>
@@ -523,7 +632,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {/* KPI 3: Jornadas / Municipios */}
                 <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
                   <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
-                    <span>Jornadas / Municipios</span>
+                    <span>Registros / Municipios</span>
                     <MapPin className="w-4 h-4 text-amber-500" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-slate-900 tracking-tight">
@@ -535,8 +644,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
                     <span>
-                      {kpiMetrics.totalFamilias.toLocaleString('es-VE')} familias
-                      atendidas
+                      {kpiMetrics.totalFamilias > 0
+                        ? `${kpiMetrics.totalFamilias.toLocaleString('es-VE')} familias atendidas`
+                        : 'Sin columna de familias'}
                     </span>
                   </div>
                 </div>
@@ -552,7 +662,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-mono tabular-nums">
                     <Users className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
-                    <span>Promedio: {kpiMetrics.avgKgPerFamily} Kg / familia</span>
+                    <span>
+                      {kpiMetrics.avgKgPerFamily !== null
+                        ? `Promedio: ${kpiMetrics.avgKgPerFamily} Kg / familia`
+                        : 'Promedio: —'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -674,18 +788,60 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               {/* Gráfico Principal de Barras: Volumen por Especie / Municipio / Campo del Excel */}
               <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
                   <div>
                     <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                      Volumen de Producción y Distribución (Toneladas Métricas)
+                      Comparativa de {activeMetricTitle}
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Comparativa acumulada según los campos del archivo Excel cargado
+                      Suma exacta acumulada desde los registros del archivo Excel cargado
                     </p>
                   </div>
 
-                  {/* Interactive Group-By Selector (including detected Excel columns!) */}
+                  {/* Interactive Metric Unit & Group-By Selectors */}
                   <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setChartMetric('toneladas')}
+                        className={`px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          chartMetric === 'toneladas'
+                            ? 'bg-white text-cyan-800 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        TM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartMetric('kilogramos')}
+                        className={`px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          chartMetric === 'kilogramos'
+                            ? 'bg-white text-cyan-800 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Kg
+                      </button>
+                    </div>
+
+                    {allNumericColumns.length > 0 && (
+                      <select
+                        aria-label="Métrica numérica del gráfico"
+                        value={chartMetric}
+                        onChange={(e) => setChartMetric(e.target.value)}
+                        className="rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none"
+                      >
+                        <option value="toneladas">Métrica: Toneladas (TM)</option>
+                        <option value="kilogramos">Métrica: Kilogramos (Kg)</option>
+                        {allNumericColumns.map((numCol) => (
+                          <option key={numCol} value={numCol}>
+                            Columna: {numCol}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
                     <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
                       <button
                         type="button"
@@ -718,8 +874,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         onChange={(e) => setBarChartMode(e.target.value)}
                         className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none"
                       >
-                        <option value="especie">Campo: Especie</option>
-                        <option value="municipio">Campo: Municipio</option>
+                        <option value="especie">Agrupar: Especie</option>
+                        <option value="municipio">Agrupar: Municipio</option>
                         {dynamicExcelColumns.map((col) => (
                           <option key={col.column} value={col.column}>
                             Campo Excel: {col.column}
@@ -770,15 +926,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         />
                         <YAxis
                           tick={{ fontSize: 11, fill: '#475569' }}
-                          unit=" TM"
+                          unit={activeMetricUnit}
                         />
                         <Tooltip
-                          formatter={(value: unknown) => [
-                            `${Number(value ?? 0).toFixed(2)} TM (${Math.round(
-                              Number(value ?? 0) * 1000
-                            ).toLocaleString('es-VE')} Kg)`,
-                            'Volumen',
-                          ]}
+                          formatter={(value: unknown) => {
+                            const num = Number(value ?? 0);
+                            if (chartMetric === 'toneladas') {
+                              return [
+                                `${num.toLocaleString('es-VE', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 3,
+                                })} TM (${(num * 1000).toLocaleString('es-VE', {
+                                  maximumFractionDigits: 1,
+                                })} Kg)`,
+                                'Volumen',
+                              ];
+                            }
+                            if (chartMetric === 'kilogramos') {
+                              return [
+                                `${num.toLocaleString('es-VE', {
+                                  maximumFractionDigits: 2,
+                                })} Kg (${(num / 1000).toFixed(3)} TM)`,
+                                'Volumen',
+                              ];
+                            }
+                            return [
+                              num.toLocaleString('es-VE', {
+                                maximumFractionDigits: 2,
+                              }),
+                              chartMetric,
+                            ];
+                          }}
                           contentStyle={{
                             backgroundColor: '#0f172a',
                             border: 'none',
@@ -788,8 +966,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           }}
                         />
                         <Bar
-                          dataKey="toneladas"
-                          name="Toneladas (TM)"
+                          dataKey="value"
+                          name={activeMetricTitle}
                           fill="#0284c7"
                           radius={[6, 6, 0, 0]}
                           maxBarSize={54}
@@ -809,13 +987,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       Evolución Temporal de Captura y Jornadas
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Toneladas registradas por fecha y curva de crecimiento acumulado
+                      {activeMetricTitle} por fecha y curva de crecimiento acumulado
                     </p>
                   </div>
 
                   {timeSeriesData.length === 0 ? (
                     <div className="h-64 flex flex-col items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500 p-4 text-center">
-                      <span>Gráfico en 0 — Adjunta un archivo Excel para graficar la evolución temporal</span>
+                      <span>
+                        {filteredRecords.length === 0
+                          ? 'Gráfico en 0 — Adjunta un archivo Excel para graficar la evolución temporal'
+                          : 'El archivo Excel cargado no incluye una columna de Fecha válida para la serie temporal'}
+                      </span>
                     </div>
                   ) : (
                     <div className="h-64 sm:h-72 w-full">
@@ -855,9 +1037,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           />
                           <YAxis
                             tick={{ fontSize: 11, fill: '#475569' }}
-                            unit=" TM"
+                            unit={activeMetricUnit}
                           />
                           <Tooltip
+                            formatter={(value: unknown, name: unknown) => [
+                              formatMetricVal(Number(value ?? 0), chartMetric),
+                              String(name ?? ''),
+                            ]}
                             contentStyle={{
                               backgroundColor: '#0f172a',
                               border: 'none',
@@ -875,7 +1061,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <Area
                             type="monotone"
                             dataKey="acumulado"
-                            name="Acumulado (TM)"
+                            name={`Acumulado${activeMetricUnit ? ` (${activeMetricUnit.trim()})` : ''}`}
                             stroke="#0891b2"
                             strokeWidth={2.5}
                             fillOpacity={1}
@@ -883,8 +1069,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           />
                           <Area
                             type="monotone"
-                            dataKey="toneladas"
-                            name="Jornada / Fecha (TM)"
+                            dataKey="valor"
+                            name={`Por Fecha${activeMetricUnit ? ` (${activeMetricUnit.trim()})` : ''}`}
                             stroke="#0f172a"
                             strokeWidth={2}
                             fillOpacity={0.1}
@@ -898,39 +1084,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* Gráfico de Dona: Distribución Porcentual (5 cols) */}
                 <div className="xl:col-span-5 bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-                  <div className="flex items-start justify-between gap-2 mb-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                     <div>
                       <h3 className="text-base font-bold text-slate-900 tracking-tight">
                         Distribución de Aporte
                       </h3>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Proporción sobre el volumen total ({kpiMetrics.totalToneladas.toFixed(2)} TM)
+                        Total: {formatMetricVal(donutTotal, chartMetric)}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setDonutMode('tipoPesca')}
-                        className={`px-2.5 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
-                          donutMode === 'tipoPesca'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Modalidad
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDonutMode('especie')}
-                        className={`px-2.5 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
-                          donutMode === 'especie'
-                            ? 'bg-white text-slate-900 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Especie
-                      </button>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setDonutMode('tipoPesca')}
+                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+                            donutMode === 'tipoPesca'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Modalidad
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDonutMode('especie')}
+                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+                            donutMode === 'especie'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Especie
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDonutMode('municipio')}
+                          className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+                            donutMode === 'municipio'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Municipio
+                        </button>
+                      </div>
+
+                      {dynamicExcelColumns.length > 0 && (
+                        <select
+                          aria-label="Agrupar distribución por campo del Excel"
+                          value={donutMode}
+                          onChange={(e) => setDonutMode(e.target.value)}
+                          className="rounded-lg border border-slate-300 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-800 focus:border-cyan-600 focus:outline-none max-w-[140px]"
+                        >
+                          <option value="tipoPesca">Modalidad</option>
+                          <option value="especie">Especie</option>
+                          <option value="municipio">Municipio</option>
+                          {dynamicExcelColumns.map((col) => (
+                            <option key={col.column} value={col.column}>
+                              {col.column}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
 
@@ -959,18 +1176,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             ))}
                           </Pie>
                           <Tooltip
-                            formatter={(value: unknown) => [
-                              `${Number(value ?? 0).toFixed(2)} TM (${
-                                kpiMetrics.totalToneladas > 0
-                                  ? (
-                                      (Number(value ?? 0) /
-                                        kpiMetrics.totalToneladas) *
-                                      100
-                                    ).toFixed(1)
-                                  : 0
-                              }%)`,
-                              'Aporte',
-                            ]}
+                            formatter={(value: unknown) => {
+                              const num = Number(value ?? 0);
+                              const pct =
+                                donutTotal > 0
+                                  ? ((num / donutTotal) * 100).toFixed(1)
+                                  : '0.0';
+                              return [
+                                `${formatMetricVal(num, chartMetric)} (${pct}%)`,
+                                'Aporte',
+                              ];
+                            }}
                             contentStyle={{
                               backgroundColor: '#0f172a',
                               border: 'none',
@@ -1233,7 +1449,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             className="hover:bg-cyan-50/40 transition-colors"
                           >
                             <td className="py-3 px-4 font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                              {row.fecha}
+                              {row.fecha || '—'}
                             </td>
                             <td className="py-3 px-4 font-semibold text-slate-900 whitespace-nowrap">
                               {row.especie}
@@ -1256,7 +1472,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               {row.tipoPesca}
                             </td>
                             <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-cyan-800 whitespace-nowrap">
-                              {row.toneladas.toFixed(2)} TM
+                              <span>
+                                {(row.kilogramos ?? row.toneladas * 1000).toLocaleString(
+                                  'es-VE',
+                                  { maximumFractionDigits: 2 }
+                                )}{' '}
+                                Kg
+                              </span>
+                              <span className="text-[11px] font-normal text-slate-500 ml-1.5">
+                                ({row.toneladas.toFixed(2)} TM)
+                              </span>
                             </td>
                             <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
                               {row.familiasBeneficiadas.toLocaleString('es-VE')}
@@ -1378,6 +1603,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             availableMunicipios={availableMunicipios}
             availableTiposPesca={availableTiposPesca}
             dynamicExcelColumns={dynamicExcelColumns}
+            hasDateData={hasDateData}
             isUploading={isUploading}
             uploadFeedback={uploadFeedback}
             mobileOpen={mobileSidebarOpen}

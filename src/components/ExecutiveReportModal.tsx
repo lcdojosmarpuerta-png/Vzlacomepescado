@@ -2,7 +2,7 @@ import React from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { FisheryRecord } from '../types/fishery';
 import { OfficialLogo } from './OfficialLogo';
-import { exportRecordsToExcel } from '../data/demoData';
+import { exportRecordsToExcel, normalizeMunicipioBarinas } from '../data/demoData';
 
 interface ExecutiveReportModalProps {
   isOpen: boolean;
@@ -20,7 +20,10 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
   if (!isOpen) return null;
 
   const totalToneladas = records.reduce((acc, r) => acc + r.toneladas, 0);
-  const totalKilogramos = Math.round(totalToneladas * 1000);
+  const totalKilogramos = records.reduce(
+    (acc, r) => acc + (r.kilogramos ?? r.toneladas * 1000),
+    0
+  );
   const totalFamilias = records.reduce(
     (acc, r) => acc + r.familiasBeneficiadas,
     0
@@ -28,22 +31,26 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
   const avgKgPerFamily =
     totalFamilias > 0 ? (totalKilogramos / totalFamilias).toFixed(2) : '0.00';
   const goalPct =
-    regionalGoalTons > 0
+    regionalGoalTons > 0 && totalToneladas > 0
       ? Math.min(100, +((totalToneladas / regionalGoalTons) * 100).toFixed(1))
       : 0;
 
   // Group by Municipality
   const byMunicipio = Array.from(
     records.reduce((map, r) => {
-      const cur = map.get(r.municipio) || {
+      const munName =
+        r.municipio === 'No especificado'
+          ? 'No especificado'
+          : normalizeMunicipioBarinas(r.municipio);
+      const cur = map.get(munName) || {
         toneladas: 0,
         familias: 0,
         jornadas: 0,
       };
-      cur.toneladas = +(cur.toneladas + r.toneladas).toFixed(2);
+      cur.toneladas += r.toneladas;
       cur.familias += r.familiasBeneficiadas;
       cur.jornadas += 1;
-      map.set(r.municipio, cur);
+      map.set(munName, cur);
       return map;
     }, new Map<string, { toneladas: number; familias: number; jornadas: number }>())
   ).sort((a, b) => b[1].toneladas - a[1].toneladas);
@@ -52,7 +59,7 @@ export const ExecutiveReportModal: React.FC<ExecutiveReportModalProps> = ({
   const bySpecies = Array.from(
     records.reduce((map, r) => {
       const cur = map.get(r.especie) || { toneladas: 0, jornadas: 0 };
-      cur.toneladas = +(cur.toneladas + r.toneladas).toFixed(2);
+      cur.toneladas += r.toneladas;
       cur.jornadas += 1;
       map.set(r.especie, cur);
       return map;

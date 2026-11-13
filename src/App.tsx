@@ -5,9 +5,9 @@ import { HeroLanding } from './components/HeroLanding';
 import { DashboardView } from './components/DashboardView';
 import { StickyFooter } from './components/StickyFooter';
 
-const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v2';
-const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v2';
-const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v2';
+const STORAGE_RECORDS_KEY = 'vcp_barinas_uploaded_records_v3';
+const STORAGE_FILES_KEY = 'vcp_barinas_uploaded_files_v3';
+const STORAGE_GOAL_KEY = 'vcp_barinas_goal_tons_v3';
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -118,14 +118,15 @@ export default function App() {
               }`
             : file.name;
 
-        const { records: parsedRecords, columns } = parseExcelBuffer(
-          buffer,
-          effectiveFileName
-        );
+        const parsed = parseExcelBuffer(buffer, effectiveFileName);
 
-        if (parsedRecords.length > 0) {
-          const fileToneladas = parsedRecords.reduce(
+        if (parsed.records.length > 0) {
+          const fileToneladas = parsed.records.reduce(
             (sum, r) => sum + r.toneladas,
+            0
+          );
+          const fileKilogramos = parsed.records.reduce(
+            (sum, r) => sum + r.kilogramos,
             0
           );
           const nowStr = new Date().toLocaleTimeString('es-VE', {
@@ -133,15 +134,19 @@ export default function App() {
             minute: '2-digit',
           });
 
-          newRecordsBatch.push(...parsedRecords);
+          newRecordsBatch.push(...parsed.records);
           newFilesBatch.push({
             id: `file-${Date.now()}-${i}`,
             name: effectiveFileName,
             uploadedAt: nowStr,
-            recordCount: parsedRecords.length,
-            totalToneladas: +fileToneladas.toFixed(2),
+            recordCount: parsed.records.length,
+            totalToneladas: +fileToneladas.toFixed(3),
+            totalKilogramos: +fileKilogramos.toFixed(2),
             sizeKB: Math.max(1, Math.round(file.size / 1024)),
-            columns,
+            columns: parsed.columns,
+            numericColumns: parsed.numericColumns,
+            detectedWeightColumn: parsed.detectedWeightColumn,
+            detectedWeightUnit: parsed.detectedWeightUnit,
           });
         }
       }
@@ -150,18 +155,22 @@ export default function App() {
         setUploadFeedback({
           type: 'error',
           message:
-            'No se encontraron filas válidas en el archivo seleccionado. Verifica que contenga datos.',
+            'No se encontraron filas válidas en el archivo seleccionado. Verifica que contenga una tabla con encabezados y registros.',
         });
       } else {
         setUploadedRecords((prev) => [...prev, ...newRecordsBatch]);
         setUploadedFiles((prev) => [...prev, ...newFilesBatch]);
 
+        const addedKg = newRecordsBatch.reduce((s, r) => s + r.kilogramos, 0);
         const addedTons = newRecordsBatch.reduce((s, r) => s + r.toneladas, 0);
         setUploadFeedback({
           type: 'success',
-          message: `Se acumularon +${newRecordsBatch.length} registros (+${addedTons.toFixed(
-            2
-          )} TM) y se crearon los filtros para los campos del Excel.`,
+          message: `Se cargaron ${newRecordsBatch.length} registros exactos (${addedKg.toLocaleString(
+            'es-VE',
+            { maximumFractionDigits: 2 }
+          )} Kg · ${addedTons.toFixed(2)} TM) desde ${newFilesBatch.length} ${
+            newFilesBatch.length === 1 ? 'archivo' : 'archivos'
+          }.`,
         });
       }
     } catch {
@@ -177,9 +186,10 @@ export default function App() {
 
   // Save a manual record or edit an existing row
   const handleSaveManualRecord = (
-    data: Omit<FisheryRecord, 'id' | 'archivoOrigen'>,
+    data: Omit<FisheryRecord, 'id' | 'archivoOrigen' | 'kilogramos'>,
     existingId?: string
   ) => {
+    const kilogramos = +(data.toneladas * 1000).toFixed(2);
     if (existingId) {
       setUploadedRecords((prev) =>
         prev.map((rec) =>
@@ -187,6 +197,7 @@ export default function App() {
             ? {
                 ...rec,
                 ...data,
+                kilogramos,
                 rawFields: {
                   ...(rec.rawFields || {}),
                   Fecha: data.fecha,
@@ -194,6 +205,7 @@ export default function App() {
                   Municipio: data.municipio,
                   Parroquia: data.parroquia,
                   Modalidad: data.tipoPesca,
+                  'Kilogramos (Kg)': String(kilogramos),
                   'Toneladas (TM)': String(data.toneladas),
                   'Familias Beneficiadas': String(data.familiasBeneficiadas),
                   'Punto de Distribución': data.puntoDistribucion,
@@ -209,6 +221,7 @@ export default function App() {
     } else {
       const newRec: FisheryRecord = {
         ...data,
+        kilogramos,
         id: `manual-${Date.now()}`,
         archivoOrigen: 'Registro Manual',
         rawFields: {
@@ -218,9 +231,14 @@ export default function App() {
           Especie: data.especie,
           Modalidad: data.tipoPesca,
           'Punto de Distribución': data.puntoDistribucion,
-          'Kilogramos (Kg)': String(Math.round(data.toneladas * 1000)),
+          'Kilogramos (Kg)': String(kilogramos),
           'Toneladas (TM)': String(data.toneladas),
           'Familias Beneficiadas': String(data.familiasBeneficiadas),
+        },
+        numericFields: {
+          'Kilogramos (Kg)': kilogramos,
+          'Toneladas (TM)': data.toneladas,
+          'Familias Beneficiadas': data.familiasBeneficiadas,
         },
       };
       setUploadedRecords((prev) => [newRec, ...prev]);

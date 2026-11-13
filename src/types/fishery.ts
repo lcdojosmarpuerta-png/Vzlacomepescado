@@ -1,16 +1,19 @@
 export interface FisheryRecord {
   id: string;
-  fecha: string; // YYYY-MM-DD
+  fecha: string; // YYYY-MM-DD or '' if no date column in Excel
   especie: string;
   municipio: string;
   parroquia: string;
   tipoPesca: string;
-  toneladas: number;
-  familiasBeneficiadas: number;
+  toneladas: number; // Exact metric tons (without premature rounding)
+  kilogramos: number; // Exact kilograms (without premature rounding)
+  familiasBeneficiadas: number; // 0 if not present in Excel (never fabricated)
   puntoDistribucion: string;
   archivoOrigen: string;
   /** Exact key-value pairs of all columns from the uploaded Excel row */
   rawFields?: Record<string, string>;
+  /** Exact numeric values parsed from every numeric column in the Excel row */
+  numericFields?: Record<string, number>;
 }
 
 export interface UploadedFileMeta {
@@ -19,8 +22,12 @@ export interface UploadedFileMeta {
   uploadedAt: string;
   recordCount: number;
   totalToneladas: number;
+  totalKilogramos: number;
   sizeKB: number;
   columns: string[];
+  numericColumns: string[];
+  detectedWeightColumn?: string;
+  detectedWeightUnit?: 'kg' | 'tm' | 'none';
 }
 
 export interface FilterState {

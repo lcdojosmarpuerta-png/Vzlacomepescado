@@ -27,6 +27,7 @@ interface ControlSidebarProps {
   availableTiposPesca: string[];
   /** Dynamic columns and their unique values extracted from the attached Excel file(s) */
   dynamicExcelColumns: { column: string; options: string[] }[];
+  hasDateData: boolean;
   isUploading: boolean;
   uploadFeedback: { type: 'success' | 'error'; message: string } | null;
   mobileOpen: boolean;
@@ -45,6 +46,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   availableMunicipios,
   availableTiposPesca,
   dynamicExcelColumns,
+  hasDateData,
   isUploading,
   uploadFeedback,
   mobileOpen,
@@ -110,6 +112,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
     filters.tipoPesca.length +
     activeCustomCount;
 
+  const hasDynamicExcelCols = dynamicExcelColumns.length > 0;
+
   const sidebarContent = (
     <div id="panel-control-filtros" className="flex flex-col gap-6">
       {/* 1. Módulo de Carga Acumulativa de Excel */}
@@ -125,8 +129,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         </div>
 
         <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-          Adjunta tu archivo Excel (.xlsx / .xls). Los campos del formato se
-          detectan automáticamente para generar los filtros y gráficas.
+          Adjunta tu archivo Excel (.xlsx / .xls). Los campos y cifras exactas
+          del formato se cargan automáticamente sin alterar los datos.
         </p>
 
         {/* Dropzone */}
@@ -221,7 +225,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               </p>
             </div>
           ) : (
-            <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <ul className="space-y-2 max-h-52 overflow-y-auto pr-1">
               {uploadedFiles.map((file) => (
                 <li
                   key={file.id}
@@ -237,13 +241,24 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                         {file.name}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
                       <span>{file.recordCount} reg.</span>
                       <span aria-hidden="true">·</span>
-                      <span>{file.totalToneladas.toFixed(2)} TM</span>
+                      <span>
+                        {(file.totalKilogramos ?? file.totalToneladas * 1000).toLocaleString(
+                          'es-VE',
+                          { maximumFractionDigits: 1 }
+                        )}{' '}
+                        Kg
+                      </span>
                       <span aria-hidden="true">·</span>
-                      <span>{file.uploadedAt}</span>
+                      <span>{file.totalToneladas.toFixed(2)} TM</span>
                     </div>
+                    {file.detectedWeightColumn && (
+                      <div className="text-[10px] text-cyan-700 mt-0.5 truncate">
+                        Columna peso: {file.detectedWeightColumn}
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -324,10 +339,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
 
         <div className="space-y-4">
           {/* Dynamic filters generated directly from every column in the uploaded Excel file */}
-          {dynamicExcelColumns.length > 0 && (
-            <div className="space-y-3 pb-3 border-b border-slate-100">
+          {hasDynamicExcelCols ? (
+            <div className="space-y-3">
               <span className="block text-[11px] font-semibold text-cyan-800">
-                Campos detectados en el Excel adjuntado ({dynamicExcelColumns.length})
+                Campos detectados en el Excel ({dynamicExcelColumns.length})
               </span>
               {dynamicExcelColumns.map(({ column, options }) => (
                 <div key={column}>
@@ -341,9 +356,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                     }
                     className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
                   >
-                    <option value="Todos">
-                      Todos ({options.length})
-                    </option>
+                    <option value="Todos">Todos ({options.length})</option>
                     {options.map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -353,59 +366,98 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 </div>
               ))}
             </div>
+          ) : (
+            /* Fallback standard filters when using manual entries or empty state */
+            <>
+              <div>
+                <label
+                  htmlFor="filter-especie"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                >
+                  Especie / Rubro
+                </label>
+                <select
+                  id="filter-especie"
+                  value={filters.especie}
+                  onChange={(e) =>
+                    onUpdateFilters({ especie: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+                >
+                  <option value="Todas">
+                    Todas las especies ({availableSpecies.length})
+                  </option>
+                  {availableSpecies.map((esp) => (
+                    <option key={esp} value={esp}>
+                      {esp}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="filter-municipio"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                >
+                  Municipio (Región Barinas)
+                </label>
+                <select
+                  id="filter-municipio"
+                  value={filters.municipio}
+                  onChange={(e) =>
+                    onUpdateFilters({ municipio: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
+                >
+                  <option value="Todos">
+                    Todos los municipios ({availableMunicipios.length})
+                  </option>
+                  {availableMunicipios.map((mun) => (
+                    <option key={mun} value={mun}>
+                      {mun}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {availableTiposPesca.length > 0 && (
+                <div>
+                  <span className="block text-xs font-semibold text-slate-700 mb-2">
+                    Modalidad / Operativo
+                  </span>
+                  <div className="space-y-1.5">
+                    {availableTiposPesca.map((tipo) => {
+                      const checked = filters.tipoPesca.includes(tipo);
+                      return (
+                        <label
+                          key={tipo}
+                          className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                            checked
+                              ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
+                              : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleTipoPesca(tipo)}
+                              className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                            />
+                            <span className="truncate">{tipo}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
-          {/* Standard Filters (Especie, Municipio, Fecha, Modalidad) */}
-          <div>
-            <label
-              htmlFor="filter-especie"
-              className="block text-xs font-semibold text-slate-700 mb-1.5"
-            >
-              Especie / Rubro
-            </label>
-            <select
-              id="filter-especie"
-              value={filters.especie}
-              onChange={(e) => onUpdateFilters({ especie: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
-            >
-              <option value="Todas">
-                Todas las especies ({availableSpecies.length})
-              </option>
-              {availableSpecies.map((esp) => (
-                <option key={esp} value={esp}>
-                  {esp}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
-              htmlFor="filter-municipio"
-              className="block text-xs font-semibold text-slate-700 mb-1.5"
-            >
-              Municipio (Región Barinas)
-            </label>
-            <select
-              id="filter-municipio"
-              value={filters.municipio}
-              onChange={(e) => onUpdateFilters({ municipio: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 font-medium focus:border-cyan-600 focus:bg-white focus:outline-none"
-            >
-              <option value="Todos">
-                Todos los municipios ({availableMunicipios.length})
-              </option>
-              {availableMunicipios.map((mun) => (
-                <option key={mun} value={mun}>
-                  {mun}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {uploadedFiles.length > 1 && (
-            <div>
+            <div className="pt-3 border-t border-slate-100">
               <label
                 htmlFor="filter-archivo"
                 className="block text-xs font-semibold text-slate-700 mb-1.5"
@@ -430,80 +482,48 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             </div>
           )}
 
-          {/* Rango de Fechas */}
-          <div>
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-              <span>Rango de Fecha</span>
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label
-                  htmlFor="fecha-inicio"
-                  className="block text-[11px] text-slate-500 mb-1"
-                >
-                  Desde
-                </label>
-                <input
-                  id="fecha-inicio"
-                  type="date"
-                  value={filters.fechaInicio}
-                  onChange={(e) =>
-                    onUpdateFilters({ fechaInicio: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="fecha-fin"
-                  className="block text-[11px] text-slate-500 mb-1"
-                >
-                  Hasta
-                </label>
-                <input
-                  id="fecha-fin"
-                  type="date"
-                  value={filters.fechaFin}
-                  onChange={(e) =>
-                    onUpdateFilters({ fechaFin: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Casillas de Verificación: Tipo de Pesca / Modalidad */}
-          {availableTiposPesca.length > 0 && (
-            <div>
-              <span className="block text-xs font-semibold text-slate-700 mb-2">
-                Modalidad / Operativo
+          {/* Rango de Fechas (Only shown when date data exists or user wants to filter dates) */}
+          {hasDateData && (
+            <div className="pt-3 border-t border-slate-100">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                <span>Rango de Fecha</span>
               </span>
-              <div className="space-y-1.5">
-                {availableTiposPesca.map((tipo) => {
-                  const checked = filters.tipoPesca.includes(tipo);
-                  return (
-                    <label
-                      key={tipo}
-                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                        checked
-                          ? 'bg-cyan-50/80 border-cyan-600 text-slate-900 font-semibold'
-                          : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/80'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleTipoPesca(tipo)}
-                          className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                        />
-                        <span className="truncate">{tipo}</span>
-                      </div>
-                    </label>
-                  );
-                })}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label
+                    htmlFor="fecha-inicio"
+                    className="block text-[11px] text-slate-500 mb-1"
+                  >
+                    Desde
+                  </label>
+                  <input
+                    id="fecha-inicio"
+                    type="date"
+                    value={filters.fechaInicio}
+                    onChange={(e) =>
+                      onUpdateFilters({ fechaInicio: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="fecha-fin"
+                    className="block text-[11px] text-slate-500 mb-1"
+                  >
+                    Hasta
+                  </label>
+                  <input
+                    id="fecha-fin"
+                    type="date"
+                    value={filters.fechaFin}
+                    onChange={(e) =>
+                      onUpdateFilters({ fechaFin: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-800 focus:border-cyan-600 focus:bg-white focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
           )}
